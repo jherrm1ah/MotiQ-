@@ -1,0 +1,140 @@
+// Motiq's AI mechanic. The app sends a question (and optionally a photo); this function adds what
+// Motiq knows about the car (details, service history, open reminders, the latest OBD-II scan),
+// asks Claude, saves both sides of the conversation and returns the answer.
+//
+//   POST { message, vehicleId?, mode?: "chat" | "voice" | "scan", imagePath? }
+//     -> { reply }
+//   mode "voice": Car Mode. Short, spoken-style answers (no lists or symbols).
+//   mode "scan":  explain an OBD-II scan in plain words (message holds the codes and readings).
+//
+// Secret: ANTHROPIC_API_KEY (Supabase → Project Settings → Edge Functions → Secrets).
+import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+class UserError extends Error {}
+
+const MODEL = "claude-opus-5-5";
+const DAILY_LIMIT = 60; // questions per person per day
+
+const RULES = `You are Motiq, a friendly, expert car mechanic inside the Motiq app. You help drivers anywhere in the world understand their car: warning lights, sounds, smells, OBD-II fault codes, maintenance, costs and what to do next.
+
+How to answer:
+- Use the car details, service history, reminders and latest scan below. Mention them when they matter ("your last oil change was 9,000 km ago").
+- Be practical: likely causes (most likely first), what the driver can safely check themselves, whether it's safe to keep driving, how urgent it is, and a rough cost range in the driver's currency when you can.
+- Be honest about uncertainty: without seeing the car you can only narrow it down. Suggest a mechanic for anything you can't confirm.
+- Safety first: for brakes, steering, airbags, fuel leaks, overheating or smoke, tell them clearly to stop driving and get help. Never suggest disabling safety systems or emissions equipment.
+- Use the driver's distance unit and currency. Keep answers short and scannable; no long essays.
+- Only answer about cars, driving, maintenance, buying/selling cars and parts, and using Motiq. Politely steer other topics back to cars.`;
+
+const VOICE = `This answer will be read aloud to someone who is driving. Reply in 1-3 short spoken sentences: no lists, headings, symbols, emoji or markdown. If it needs more detail, say they can read more in the app when parked. Never ask them to look at the screen while driving.`;
+
+const SCAN = `The message is an OBD-II scan from the driver's car. Explain it in plain words: what each code means for this car, how serious it is (start with the most serious), whether it's safe to drive, what to check or fix first and a rough cost. Comment on any readings that look wrong (e.g. battery under 12.2 V with the engine off, or under 13.5 V running; coolant over 105 °C). If there are no codes and the readings look normal, say the car looks healthy.`;
+
+function carContext(car: any, services: any[], reminders: any[], scan: any, me: any) {
+  if (!car) return "The driver hasn't picked a car yet.";
+  const unit = me?.distance_unit || "km";
+  const lines = [
+    `Car: ${[car.year, car.make, car.model, car.trim_level].filter(Boolean).join(" ")}${car.nickname ? ` ("${car.nickname}")` : ""}`,
+    `Fuel: ${car.fuel}. Gearbox: ${car.transmission}. Odometer: ${car.odometer} ${unit}.${car.vin ? ` VIN: ${car.vin}.` : ""}`,
+  ];
+  if (services.length) lines.push("Recent service history:\n" + services.map((s) => `- ${s.done_on}: ${s.title}${s.odometer ? ` at ${s.odometer} ${unit}` : ""}${s.notes ? ` (${s.notes.slice(0, 120)})` : ""}`).join("\n"));
+  else lines.push("No service history recorded yet.");
+  if (reminders.length) lines.push("Open reminders:\n" + reminders.map((r) => `- ${r.title}${r.due_on ? ` due ${r.due_on}` : ""}${r.due_odometer ? ` at ${r.due_odometer} ${unit}` : ""}`).join("\n"));
+  if (scan) {
+    const codes = (scan.codes || []).map((c: any) => `${c.code} (${c.kind})`).join(", ") || "none";
+    lines.push(`Latest scan (${scan.created_at.slice(0, 10)}${scan.source === "demo" ? ", demo data" : ""}): check engine light ${scan.check_engine ? "ON" : "off"}; codes: ${codes}; readings: ${JSON.stringify(scan.readings || {})}.`);
+  }
+  return lines.join("\n");
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  try {
+    const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer /, "");
+    const { data: u } = await admin.auth.getUser(token);
+    if (!u?.user) return json({ error: "Sign in first" }, 401);
+    const uid = u.user.id;
+    const body = await req.json().catch(() => ({}));
+    const mode = body.mode === "voice" || body.mode === "scan" ? body.mode : "chat";
+    const message = String(body.message || "").trim().slice(0, 4000);
+    if (!message) throw new UserError("Ask something about your car.");
+    if (!Deno.env.get("ANTHROPIC_API_KEY")) throw new UserError("The AI mechanic isn't switched on yet. The Motiq team needs to add its key.");
+
+    const since = new Date(Date.now() - 86400000).toISOString();
+    const { count } = await admin.from("ai_messages").select("id", { count: "exact", head: true }).eq("owner_id", uid).eq("role", "user").gte("created_at", since);
+    if ((count ?? 0) >= DAILY_LIMIT) throw new UserError(`You've asked ${DAILY_LIMIT} questions today. Try again tomorrow.`);
+
+    // The car (only one of yours) and what Motiq knows about it.
+    const vehicleId = body.vehicleId ? String(body.vehicleId) : null;
+    const [{ data: me }, { data: car }] = await Promise.all([
+      admin.from("profiles").select("name, country, currency, distance_unit, city").eq("id", uid).maybeSingle(),
+      vehicleId ? admin.from("vehicles").select("*").eq("id", vehicleId).eq("owner_id", uid).maybeSingle() : Promise.resolve({ data: null }),
+    ]);
+    const [{ data: services }, { data: reminders }, { data: scans }, { data: history }] = await Promise.all([
+      car ? admin.from("service_records").select("title, done_on, odometer, notes").eq("vehicle_id", car.id).order("done_on", { ascending: false }).limit(12) : Promise.resolve({ data: [] }),
+      car ? admin.from("reminders").select("title, due_on, due_odometer").eq("vehicle_id", car.id).is("done_at", null).limit(10) : Promise.resolve({ data: [] }),
+      car ? admin.from("scans").select("source, check_engine, codes, readings, created_at").eq("vehicle_id", car.id).order("created_at", { ascending: false }).limit(1) : Promise.resolve({ data: [] }),
+      admin.from("ai_messages").select("role, content").eq("owner_id", uid).eq("mode", mode === "scan" ? "chat" : mode)
+        .match(car ? { vehicle_id: car.id } : {}).order("created_at", { ascending: false }).limit(16),
+    ]);
+
+    const driver = `Driver: ${me?.name || "unknown name"}${me?.city ? `, ${me.city}` : ""}${me?.country ? ` (${me.country})` : ""}. Currency: ${me?.currency || "USD"}. Distance unit: ${me?.distance_unit || "km"}. Today: ${new Date().toISOString().slice(0, 10)}.`;
+    const context = `${driver}\n${carContext(car, services || [], reminders || [], (scans || [])[0], me)}`;
+
+    // Earlier turns (oldest first), then this question, with the photo if there is one.
+    const past: Anthropic.Beta.BetaMessageParam[] = (history || []).reverse().map((m: any) => ({ role: m.role, content: m.content }));
+    while (past.length && past[0].role !== "user") past.shift();
+    const content: Anthropic.Beta.BetaContentBlockParam[] = [];
+    let imagePath: string | null = null;
+    if (body.imagePath && typeof body.imagePath === "string" && body.imagePath.startsWith(`${uid}/`)) {
+      const { data: file } = await admin.storage.from("ai-photos").download(body.imagePath);
+      if (file) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        if (bytes.length <= 5 * 1024 * 1024) {
+          let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+          content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: btoa(bin) } });
+          imagePath = body.imagePath;
+        }
+      }
+    }
+    content.push({ type: "text", text: message });
+
+    const client = new Anthropic();
+    const response = await client.beta.messages.create({
+      model: MODEL,
+      max_tokens: mode === "voice" ? 1000 : 4000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: { effort: mode === "voice" ? "low" : "medium" },
+      // Stable rules first (cached), then this driver's car (changes as they use the app).
+      system: [
+        { type: "text", text: RULES, cache_control: { type: "ephemeral" } },
+        { type: "text", text: [mode === "voice" ? VOICE : "", mode === "scan" ? SCAN : "", context].filter(Boolean).join("\n\n") },
+      ],
+      messages: [...past, { role: "user", content }],
+    });
+
+    if (response.stop_reason === "refusal") throw new UserError("Motiq can't help with that one. Try asking about your car in a different way.");
+    const reply = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n").trim();
+    if (!reply) throw new UserError("Motiq couldn't answer that. Try again.");
+
+    await admin.from("ai_messages").insert([
+      { owner_id: uid, vehicle_id: car?.id ?? null, mode: mode === "scan" ? "chat" : mode, role: "user", content: mode === "scan" ? `Explain my scan:\n${message}` : message, image_path: imagePath },
+      { owner_id: uid, vehicle_id: car?.id ?? null, mode: mode === "scan" ? "chat" : mode, role: "assistant", content: reply.slice(0, 20000) },
+    ]);
+    return json({ reply });
+  } catch (e) {
+    if (e instanceof UserError) return json({ error: e.message }, 400);
+    if (e instanceof Anthropic.RateLimitError) return json({ error: "Motiq is busy right now. Try again in a minute." }, 429);
+    if (e instanceof Anthropic.APIError) { console.error("anthropic", e.status, e.message); return json({ error: "Motiq couldn't reach the AI. Try again." }, 502); }
+    console.error(e);
+    return json({ error: "Something went wrong. Try again." }, 500);
+  }
+});

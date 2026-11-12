@@ -1,0 +1,9 @@
+{
+  "appId": "com.orynthra.motiq",
+  "appName": "Motiq",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#0B0E13",
+    "allowMixedContent": false
+  }
+}
