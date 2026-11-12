@@ -129,9 +129,11 @@ Deno.serve(async (req) => {
     const reply = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n").trim();
     if (!reply) throw new UserError("Motiq couldn't answer that. Try again.");
 
+    // The answer is stamped just after the question so they always come back in order.
+    const asked = Date.now();
     await admin.from("ai_messages").insert([
-      { owner_id: uid, vehicle_id: car?.id ?? null, mode: mode === "scan" ? "chat" : mode, role: "user", content: mode === "scan" ? `Explain my scan:\n${message}` : message, image_path: imagePath },
-      { owner_id: uid, vehicle_id: car?.id ?? null, mode: mode === "scan" ? "chat" : mode, role: "assistant", content: reply.slice(0, 20000) },
+      { owner_id: uid, vehicle_id: car?.id ?? null, mode: mode === "scan" ? "chat" : mode, role: "user", content: mode === "scan" ? `Explain my scan:\n${message}` : message, image_path: imagePath, created_at: new Date(asked).toISOString() },
+      { owner_id: uid, vehicle_id: car?.id ?? null, mode: mode === "scan" ? "chat" : mode, role: "assistant", content: reply.slice(0, 20000), created_at: new Date(asked + 1).toISOString() },
     ]);
     return json({ reply });
   } catch (e) {
