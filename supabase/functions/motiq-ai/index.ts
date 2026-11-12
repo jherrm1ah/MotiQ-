@@ -35,6 +35,10 @@ How to answer:
 
 const VOICE = `This answer will be read aloud to someone who is driving. Reply in 1-3 short spoken sentences: no lists, headings, symbols, emoji or markdown. If it needs more detail, say they can read more in the app when parked. Never ask them to look at the screen while driving.`;
 
+// Chat and scans start with a verdict tag the app turns into a "Safe to drive / Drive with caution /
+// Stop driving" badge. Voice answers don't (they're read aloud).
+const VERDICT = `Start your answer with exactly one tag on its own line: [VERDICT:safe] (fine to keep driving normally), [VERDICT:caution] (drive only if necessary and briefly, get it checked soon) or [VERDICT:stop] (don't drive: arrange a tow or roadside help). Pick the more cautious one when unsure, and never play down brakes, steering, fuel smell, smoke or overheating. If the question isn't about a problem with the car (e.g. maintenance advice or prices), or you need to ask one clarifying question first, leave the tag out.`;
+
 const SCAN = `The message is an OBD-II scan from the driver's car. Explain it in plain words: what each code means for this car, how serious it is (start with the most serious), whether it's safe to drive, what to check or fix first and a rough cost. Comment on any readings that look wrong (e.g. battery under 12.2 V with the engine off, or under 13.5 V running; coolant over 105 °C). If there are no codes and the readings look normal, say the car looks healthy.`;
 
 function carContext(car: any, services: any[], reminders: any[], scan: any, me: any) {
@@ -116,7 +120,7 @@ Deno.serve(async (req) => {
       // Stable rules first (cached), then this driver's car (changes as they use the app).
       system: [
         { type: "text", text: RULES, cache_control: { type: "ephemeral" } },
-        { type: "text", text: [mode === "voice" ? VOICE : "", mode === "scan" ? SCAN : "", context].filter(Boolean).join("\n\n") },
+        { type: "text", text: [mode === "voice" ? VOICE : VERDICT, mode === "scan" ? SCAN : "", context].filter(Boolean).join("\n\n") },
       ],
       messages: [...past, { role: "user", content }],
     });

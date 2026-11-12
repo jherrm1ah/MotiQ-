@@ -73,7 +73,8 @@ export async function setScanSummary(id, summary) { await supabase.from("scans")
 export async function loadAiHistory(uid, vehicleId, mode = "chat") {
   let q = supabase.from("ai_messages").select("id, role, content, created_at, image_path").eq("owner_id", uid).eq("mode", mode).order("created_at", { ascending: false }).limit(40);
   if (vehicleId) q = q.eq("vehicle_id", vehicleId);
-  return ok(await q, "chat").reverse();
+  // A question and its answer are saved together (same time): put the question first.
+  return ok(await q, "chat").sort((a, b) => a.created_at.localeCompare(b.created_at) || (a.role === "user" ? -1 : 1) - (b.role === "user" ? -1 : 1));
 }
 export async function clearAiHistory(uid) { ok(await supabase.from("ai_messages").delete().eq("owner_id", uid), "chat"); }
 export async function askMotiq({ message, vehicleId, mode = "chat", imagePath = null }) {
@@ -207,3 +208,27 @@ export function reminderTemplates(unit = "km") {
     { kind: "licence", title: "Vehicle licence / registration renewal", every_months: 12, every_distance: null },
   ];
 }
+
+// ---- Documents & warranty (per car)
+export async function loadDocuments(uid) {
+  return ok(await supabase.from("vehicle_documents").select("*").eq("owner_id", uid).order("expires_on", { ascending: true, nullsFirst: false }), "documents");
+}
+export async function addDocument(uid, d) {
+  return ok(await supabase.from("vehicle_documents").insert({
+    owner_id: uid, vehicle_id: d.vehicle_id, kind: d.kind || "other", title: d.title.trim(), expires_on: d.expires_on || null, notes: (d.notes || "").trim(),
+  }).select().single(), "document");
+}
+export async function deleteDocument(id) { ok(await supabase.from("vehicle_documents").delete().eq("id", id), "document"); }
+
+// ---- Trips
+export async function loadTrips(uid) {
+  return ok(await supabase.from("trips").select("*").eq("owner_id", uid).order("ended_at", { ascending: false }).limit(100), "trips");
+}
+export async function saveTrip(uid, t) {
+  return ok(await supabase.from("trips").insert({
+    owner_id: uid, vehicle_id: t.vehicle_id || null, origin: (t.origin || "").slice(0, 120), destination: (t.destination || "").slice(0, 120),
+    distance_km: Math.round((t.distance_km || 0) * 100) / 100, duration_sec: Math.round(t.duration_sec || 0), alerts: t.alerts || 0,
+    real_route: !!t.real_route, completed: !!t.completed,
+  }).select().single(), "trip");
+}
+export async function clearTrips(uid) { ok(await supabase.from("trips").delete().eq("owner_id", uid), "trips"); }
