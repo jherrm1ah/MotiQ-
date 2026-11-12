@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { margin: 0; height: 100%; }
+body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.leaflet-container { font-family: inherit; background: #d8d8d8; }
+.leaflet-control-attribution { font-size: 9px !important; }
+
+/* Motion: screens fade up, sheets slide up, skeletons shimmer. Respects "reduce motion". */
+@keyframes screenIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes sheetIn { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes neonPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(239,255,0,0.35); } 50% { box-shadow: 0 0 0 6px rgba(239,255,0,0); } }
+.screen-in { animation: screenIn 220ms cubic-bezier(.2,.8,.2,1) both; }
+.sheet-in { animation: sheetIn 260ms cubic-bezier(.2,.8,.2,1) both; }
+.fade-in { animation: fadeIn 200ms ease both; }
+.skeleton { background: linear-gradient(90deg, rgba(128,128,128,0.12) 25%, rgba(128,128,128,0.24) 37%, rgba(128,128,128,0.12) 63%); background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
+.neon-pulse { animation: neonPulse 2.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .screen-in, .sheet-in, .fade-in, .skeleton, .neon-pulse { animation: none !important; } }

@@ -1,0 +1,15 @@
+{
+  "appId": "com.orynthra.motiq",
+  "appName": "Motiq",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#212121",
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_motiq",
+      "iconColor": "#212121"
+    }
+  }
+}

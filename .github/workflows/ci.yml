@@ -1,0 +1,40 @@
+name: CI
+
+# Builds Motiq and runs the browser test on each pull request and on main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Cache test browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.63.0-chromium
+      - name: Install browser
+        timeout-minutes: 8
+        run: |
+          npm install --no-save playwright@1.63.0
+          for i in 1 2 3; do timeout 150 npx playwright install chromium && break; echo "Browser download attempt $i didn't finish, trying again"; sleep 5; done
+          if ! node -e "require('playwright').chromium.launch().then(b => b.close())"; then
+            sudo timeout 300 npx playwright install-deps chromium
+          fi
+      - name: Browser test
+        run: node tests/run-e2e.mjs

@@ -1,0 +1,70 @@
+name: Play Store release
+
+# Builds the signed Android App Bundle (.aab) to upload to Google Play. Run it from the Actions
+# tab ("Run workflow"). It needs four repository secrets (Settings → Secrets and variables →
+# Actions), made once with the steps in store/README.md:
+#   MOTIQ_UPLOAD_KEYSTORE_B64  the upload keystore file, base64-encoded
+#   MOTIQ_KEYSTORE_PASSWORD    its password
+#   MOTIQ_KEY_ALIAS            the key's alias (e.g. upload)
+#   MOTIQ_KEY_PASSWORD         the key's password
+# Raise VERSION_NAME in android/version.properties before each release.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - name: Check the signing secrets are set
+        env:
+          KS: ${{ secrets.MOTIQ_UPLOAD_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KS" ]; then echo "::error::Add the MOTIQ_UPLOAD_KEYSTORE_B64 secret first (see store/README.md)"; exit 1; fi
+      - name: Android SDK packages
+        run: |
+          SDKM=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools" > /dev/null
+      - run: npm ci --no-audit --no-fund
+      - name: Build web app and copy it into the Android project
+        run: |
+          npm run build
+          npx cap sync android
+      - name: Build signed bundle
+        working-directory: android
+        env:
+          KS_B64: ${{ secrets.MOTIQ_UPLOAD_KEYSTORE_B64 }}
+          MOTIQ_KEYSTORE_PASSWORD: ${{ secrets.MOTIQ_KEYSTORE_PASSWORD }}
+          MOTIQ_KEY_ALIAS: ${{ secrets.MOTIQ_KEY_ALIAS }}
+          MOTIQ_KEY_PASSWORD: ${{ secrets.MOTIQ_KEY_PASSWORD }}
+        run: |
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/upload.keystore"
+          export MOTIQ_UPLOAD_KEYSTORE="$RUNNER_TEMP/upload.keystore"
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon --stacktrace
+          rm -f "$RUNNER_TEMP/upload.keystore"
+      - name: Verify the bundle is signed
+        run: |
+          AAB=android/app/build/outputs/bundle/release/app-release.aab
+          test -s "$AAB"
+          jarsigner -verify "$AAB" | grep -q "jar verified"
+          mkdir -p out && cp "$AAB" "out/Motiq-$(sed -n 's/^VERSION_NAME=//p' android/version.properties).aab"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Motiq-play-bundle
+          path: out/
+          retention-days: 30
