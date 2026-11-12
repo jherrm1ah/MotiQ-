@@ -3,6 +3,7 @@
 // this car's details, service history and last scan.
 import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ScanLine, Gauge, ShieldAlert, Timer, Droplets, Sparkles, Camera, Plus, Send, Mic, Loader2, Clock, Wrench, AudioLines, Bot, Trash2, ImagePlus } from "lucide-react";
+import { t } from "../lib/i18n.js";
 import { useTheme, useUI, RED, VERDICT_STYLE, VerdictBadge, parseVerdict, ScreenHeader, RoundButton, carLabel, timeAgo, SecondaryButton, Skeleton } from "../design.jsx";
 import { askMotiq, loadAiHistory, clearAiHistory, uploadPhoto } from "../lib/data.js";
 import { canListen, listen, stopListening } from "../lib/voice.js";
@@ -101,7 +102,7 @@ export default function AIScreen() {
 
   return (
     <div className="relative flex min-h-full flex-col px-5 pt-2" style={{ paddingBottom: 176 }}>
-      <ScreenHeader title="AI Diagnostics" sub="Describe what's happening — get a real triage answer." note="AI-generated guidance, not a certified inspection."
+      <ScreenHeader title={t("AI Diagnostics")} sub="Describe what's happening — get a real triage answer." note="AI-generated guidance, not a certified inspection."
         right={<RoundButton icon={Clock} label="Diagnosis history" onClick={() => openSheet("Diagnosis history", <History items={verdictHistory} onClear={() => confirm("Clear AI history?", "Deletes all your conversations with the AI mechanic, for every car.", "Clear", async () => { await clearAiHistory(uid); setMessages([]); showToast("AI history cleared"); })} />)} />} />
 
       {vehicles.length > 1 && (

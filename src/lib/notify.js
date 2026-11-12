@@ -8,6 +8,7 @@ export const canNotify = native;
 
 // A stable 31-bit id from a string, so the same reminder keeps the same notification.
 const idOf = (s) => { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h) % 2000000000; };
+const daysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`).getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000);
 const at9 = (iso, daysBefore) => { const d = new Date(`${iso}T09:00:00`); d.setDate(d.getDate() - daysBefore); return d; };
 
 export async function askNotificationPermission() {
@@ -42,6 +43,16 @@ export async function syncReminders({ vehicles, reminders, documents, prefs }) {
         }
       }
     }
+    // Morning car check: every day at the chosen time, with what's on today.
+    if (prefs.morningCheck) {
+      const [hh, mm] = String(prefs.morningTime || "07:30").split(":").map(Number);
+      const due = reminders.filter((x) => !x.done_at && x.due_on && daysTo(x.due_on) <= 7).length;
+      const docs = documents.filter((x) => x.expires_on && daysTo(x.expires_on) <= 14).length;
+      const body = due || docs ? [due && `${due} service${due === 1 ? "" : "s"} due this week`, docs && `${docs} document${docs === 1 ? "" : "s"} expiring`].filter(Boolean).join(" · ") + " — tap for today's check." : "Your car looks good. Tap for today's weather and fuel prices.";
+      list.push({ id: idOf("morning"), title: "Good morning — your car check", body, schedule: { on: { hour: hh || 7, minute: mm || 0 }, allowWhileIdle: true }, smallIcon: "ic_stat_motiq", iconColor: "#212121" });
+    }
+    // Weekly summary: Sundays at 6 pm.
+    if (prefs.weeklySummary !== false) list.push({ id: idOf("weekly"), title: "Your week with Motiq", body: "Distance, money spent, your driving score and what's coming up.", schedule: { on: { weekday: 1, hour: 18, minute: 0 }, allowWhileIdle: true }, smallIcon: "ic_stat_motiq", iconColor: "#212121" });
     if (list.length) await LocalNotifications.schedule({ notifications: list.slice(0, 60) });
   } catch (e) { console.warn("reminders", e); }
 }

@@ -4,4 +4,5 @@
     <string name="title_activity_main">Motiq</string>
     <string name="package_name">com.orynthra.motiq</string>
     <string name="custom_url_scheme">com.orynthra.motiq</string>
+    <string name="widget_description">Your car\'s health, what\'s due, fuel prices and quick Trip and SOS buttons.</string>
 </resources>

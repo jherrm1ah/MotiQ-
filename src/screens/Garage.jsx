@@ -2,8 +2,9 @@
 // history, documents, the OBD-II adapter and editing. The forms here are reused from Home.
 import React, { useState } from "react";
 import {
-  Plus, ChevronDown, ChevronRight, Car, Bluetooth, BluetoothConnected, Trash2, Check, AlertTriangle, Wrench, Bot, Pencil, Gauge, ScanLine, FileText, Loader2, Fuel, ShieldAlert, Share2, Camera, Search,
+  Plus, ChevronDown, ChevronRight, Car, Bluetooth, BluetoothConnected, Trash2, Check, AlertTriangle, Wrench, Bot, Pencil, Gauge, ScanLine, FileText, Loader2, Fuel, ShieldAlert, Share2, Camera, Search, Users, UserPlus, LogOut, Copy,
 } from "lucide-react";
+import { t } from "../lib/i18n.js";
 import {
   useTheme, useUI, RED, AMBER, GREEN, Ring, Field, Pill, PrimaryButton, SecondaryButton, LiveStat, Empty, ScreenHeader,
   carLabel, carFull, healthColor, fmtSpeed, fmtTemp,
@@ -14,6 +15,62 @@ import {
 import { money, todayISO, dateLabel } from "../lib/units.js";
 import { decodeVin, readVinFromPhoto } from "../lib/data.js";
 import { FuelSheet, RecallsSheet, shareHistory } from "./CarTools.jsx";
+import { createInvite, redeemInvite, loadMembers, removeMember, isPro } from "../lib/data.js";
+import { UpgradeSheet } from "./ProfileExtras.jsx";
+
+// Owner: make an invite code and see / remove who the car is shared with.
+function ShareCarSheet({ car }) {
+  const { uid, showToast, confirm } = useUI();
+  const { CARD_ALT, TEXT, SUB, BORDER } = useTheme();
+  const [code, setCode] = useState(null);
+  const [members, setMembers] = useState(null);
+  const [busy, setBusy] = useState(false);
+  React.useEffect(() => { loadMembers(car.id).then(setMembers).catch(() => setMembers([])); }, [car.id]);
+  const make = async () => { setBusy(true); try { setCode(await createInvite(uid, car.id)); } catch (e) { showToast(e.message); } setBusy(false); };
+  const share = async () => {
+    const text = `Join my ${carLabel(car)} on Motiq: open Garage → Join a shared car and enter ${code}`;
+    try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(code); showToast("Code copied"); } } catch {}
+  };
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm leading-relaxed" style={{ color: SUB }}>Family or a driver can see this car and add services, fill-ups and reminders. Only you can edit or remove the car.</p>
+      {code ? (
+        <div className="flex flex-col items-center gap-2 rounded-2xl p-5" style={{ backgroundColor: CARD_ALT }}>
+          <p className="text-xs" style={{ color: SUB }}>Invite code · works once, for 7 days</p>
+          <p className="font-mono text-3xl font-bold tracking-[0.25em]" style={{ color: TEXT }} aria-label="Invite code">{code}</p>
+          <SecondaryButton onClick={share}><Copy size={14} /> Send the code</SecondaryButton>
+        </div>
+      ) : <PrimaryButton onClick={make} disabled={busy}>{busy ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />} Make an invite code</PrimaryButton>}
+      <div>
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: SUB }}>Shared with</p>
+        {members == null ? <Loader2 size={15} className="animate-spin" style={{ color: SUB }} /> : members.length === 0 ? <p className="text-sm" style={{ color: SUB }}>Nobody yet.</p> : members.map((m) => (
+          <div key={m.member_id} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${BORDER}` }}>
+            <span className="text-sm" style={{ color: TEXT }}>{(m.member && m.member.name) || "Motiq driver"}</span>
+            <button className="text-xs font-medium" style={{ color: RED }} onClick={() => confirm("Stop sharing?", `${(m.member && m.member.name) || "They"} will no longer see this car.`, "Remove", async () => { try { await removeMember(car.id, m.member_id); setMembers((x) => x.filter((y) => y.member_id !== m.member_id)); } catch (e) { showToast(e.message); } })}>Remove</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function JoinCarSheet({ onDone }) {
+  const { reload, showToast, setCarId } = useUI();
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const join = async () => {
+    setBusy(true);
+    try { const id = await redeemInvite(code.trim().toUpperCase()); await reload(); if (id) setCarId(id); showToast("Car added to your garage"); onDone && onDone(); }
+    catch (e) { showToast(e.message); }
+    setBusy(false);
+  };
+  return (
+    <div className="flex flex-col gap-4">
+      <Field label="Invite code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8))} placeholder="e.g. K7M2QX9P" />
+      <PrimaryButton onClick={join} disabled={busy || code.length !== 8}>{busy ? <Loader2 size={15} className="animate-spin" /> : <Users size={15} />} Join car</PrimaryButton>
+    </div>
+  );
+}
 
 const FUELS = [["petrol", "Petrol"], ["diesel", "Diesel"], ["hybrid", "Hybrid"], ["electric", "Electric"], ["lpg", "Gas (LPG/CNG)"], ["other", "Other"]];
 const GEARS = [["automatic", "Automatic"], ["manual", "Manual"], ["cvt", "CVT"], ["other", "Other"]];
@@ -181,20 +238,22 @@ export function OBDConnectSheet({ onScan, onDemo }) {
 }
 
 export default function Garage() {
-  const { me, unit, vehicles, garage, documents, fuel, obd, liveData, connectOBD, disconnectOBD, openSheet, closeSheet, confirm, goTo, setCarId, reload, showToast } = useUI();
+  const { me, uid, unit, vehicles, garage, documents, fuel, obd, liveData, connectOBD, disconnectOBD, openSheet, closeSheet, confirm, goTo, setCarId, reload, showToast } = useUI();
   const { CARD, CARD_ALT, TEXT, SUB, BORDER, RING_TRACK, FILL, FILL_TEXT } = useTheme();
   const [expanded, setExpanded] = useState(vehicles.length === 1 ? vehicles[0].id : null);
-  const addCar = () => openSheet("Add a vehicle", <CarForm onDone={(c) => { setExpanded(c.id); setCarId(c.id); closeSheet(); }} />);
+  const addCar = () => (!isPro(me) && vehicles.filter((v) => v.owner_id === uid).length >= 2) ? openSheet("Motiq Pro", <><p className="mb-4 text-sm" style={{ color: SUB }}>The free plan has room for 2 cars. Upgrade for more.</p><UpgradeSheet /></>) : openSheet("Add a vehicle", <CarForm onDone={(c) => { setExpanded(c.id); setCarId(c.id); closeSheet(); }} />);
 
   return (
     <div className="flex flex-col gap-5 px-5 pt-2" style={{ paddingBottom: 120 }}>
       <div className="flex items-center justify-between pt-2">
         <div>
-          <h1 className="font-bold tracking-tight" style={{ fontSize: 20, color: TEXT }}>Smart Garage</h1>
+          <h1 className="font-bold tracking-tight" style={{ fontSize: 20, color: TEXT }}>{t("Smart Garage")}</h1>
           <p className="mt-0.5 text-sm" style={{ color: SUB }}>{vehicles.length} vehicle{vehicles.length === 1 ? "" : "s"} tracked</p>
         </div>
         <button onClick={addCar} className="flex h-10 w-10 items-center justify-center rounded-full active:scale-90 transition-transform" style={{ backgroundColor: FILL }} aria-label="Add a car"><Plus size={18} style={{ color: FILL_TEXT }} /></button>
       </div>
+
+      <button onClick={() => openSheet(t("Join a shared car"), <JoinCarSheet onDone={closeSheet} />)} className="-mt-2 flex items-center gap-1.5 self-start text-xs font-medium" style={{ color: SUB }}><Users size={13} /> {t("Join a shared car")}</button>
 
       {vehicles.length === 0 && <Empty icon={Car} title="Your garage is empty" text="Add a car to track its health and service, scan it with an OBD-II adapter, and get AI help for it." action="Add a car" onAction={addCar} />}
 
@@ -205,12 +264,13 @@ export default function Garage() {
           const services = garage.services.filter((s) => s.vehicle_id === v.id);
           const docs = documents.filter((d) => d.vehicle_id === v.id);
           const connected = obd.status === "connected" && obd.vehicleId === v.id;
+          const shared = v.owner_id && uid && v.owner_id !== uid;
           return (
             <div key={v.id} className="overflow-hidden" style={{ borderRadius: 24, backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
               <button onClick={() => { setExpanded(isOpen ? null : v.id); if (!isOpen) setCarId(v.id); }} aria-expanded={isOpen} className="flex w-full items-center gap-3 p-4 text-left">
                 <div className="relative flex items-center justify-center"><Ring pct={v.health} color={healthColor(v.health)} size={46} stroke={4.5} track={RING_TRACK} /><span className="absolute font-semibold" style={{ fontSize: 11, color: TEXT }}>{v.health}</span></div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium" style={{ color: TEXT }}>{carLabel(v)}</p>
+                  <p className="flex items-center gap-1.5 truncate text-sm font-medium" style={{ color: TEXT }}>{carLabel(v)}{shared && <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: CARD_ALT, color: SUB }}>Shared</span>}</p>
                   <p className="mt-0.5 truncate text-xs" style={{ color: SUB }}>{carFull(v)} · {(v.odometer || 0).toLocaleString()} {unit}</p>
                 </div>
                 {v.healthInfo.overdue.length > 0 && <span className="shrink-0 rounded-full px-2 py-1 font-medium" style={{ fontSize: 10, backgroundColor: "rgba(244,85,61,0.15)", color: RED }}>Overdue</span>}
@@ -258,7 +318,7 @@ export default function Garage() {
                     <SmallButton icon={Fuel} label="Fuel log" onClick={() => openSheet(`Fuel log — ${carLabel(v)}`, <FuelSheet car={v} />)} />
                     <SmallButton icon={ShieldAlert} label="Recalls & issues" onClick={() => openSheet(`Recalls & known problems`, <RecallsSheet car={v} />)} />
                   </div>
-                  <SmallButton icon={Share2} label="Share car history (PDF)" onClick={async () => { try { const r = await shareHistory({ car: v, garage, documents, fuel, me, unit }); if (r === "downloaded") showToast("History PDF downloaded"); } catch (e) { showToast(e.message || "Couldn't make the PDF"); } }} />
+                  <SmallButton icon={Share2} label="Share car history (PDF)" onClick={async () => { if (!isPro(me)) { openSheet("Motiq Pro", <UpgradeSheet />); return; } try { const r = await shareHistory({ car: v, garage, documents, fuel, me, unit }); if (r === "downloaded") showToast("History PDF downloaded"); } catch (e) { showToast(e.message || "Couldn't make the PDF"); } }} />
 
                   {services.length > 0 && (
                     <div className="rounded-2xl p-3" style={{ backgroundColor: CARD_ALT }}>
@@ -296,10 +356,13 @@ export default function Garage() {
                     <MiniRow icon={Bluetooth} text={obd.status === "connecting" && obd.vehicleId === v.id ? "Looking for your adapter..." : "Connect OBD-II adapter"} onClick={() => openSheet("Connect OBD-II adapter", <OBDConnectSheet onScan={() => { closeSheet(); connectOBD(v.id); }} onDemo={() => { setCarId(v.id); goTo("scan"); }} />)} />
                   )}
 
-                  <div className="grid grid-cols-2 gap-2">
+                  {shared ? (
+                    <SmallButton icon={LogOut} label="Leave this shared car" color={RED} onClick={() => confirm(`Leave ${carLabel(v)}?`, "It will disappear from your garage. What you added stays with the car.", "Leave", async () => { try { await removeMember(v.id, uid); await reload(); showToast("You left the car"); } catch (e) { showToast(e.message); } })} />
+                  ) : <SmallButton icon={Users} label={t("Share this car")} onClick={() => openSheet(t("Share this car"), <ShareCarSheet car={v} />)} />}
+                  {!shared && <div className="grid grid-cols-2 gap-2">
                     <SmallButton icon={Pencil} label="Edit car" onClick={() => openSheet("Edit car", <CarForm car={v} onDone={closeSheet} />)} />
                     <SmallButton icon={Trash2} label="Remove" color={RED} onClick={() => confirm(`Remove ${carLabel(v)}?`, "This also removes its reminders, service history, scans and documents. This can't be undone.", "Remove", async () => { try { await deleteCar(v.id); await reload(); showToast(`${carLabel(v)} removed`); if (obd.vehicleId === v.id) disconnectOBD(true); } catch (e) { showToast(e.message); } })} />
-                  </div>
+                  </div>}
                 </div>
               )}
             </div>

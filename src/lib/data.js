@@ -13,14 +13,17 @@ export async function saveProfile(uid, patch) {
   return ok(await supabase.from("profiles").update(patch).eq("id", uid).select().single(), "your profile");
 }
 
+// Your cars and the ones shared with you (row level security decides), with their history.
 export async function loadGarage(uid) {
-  const [cars, services, reminders, scans] = await Promise.all([
-    supabase.from("vehicles").select("*").eq("owner_id", uid).order("created_at"),
-    supabase.from("service_records").select("*").eq("owner_id", uid).order("done_on", { ascending: false }).limit(300),
-    supabase.from("reminders").select("*").eq("owner_id", uid).order("due_on", { ascending: true, nullsFirst: false }).limit(300),
-    supabase.from("scans").select("*").eq("owner_id", uid).order("created_at", { ascending: false }).limit(60),
+  const cars = ok(await supabase.from("vehicles").select("*").order("created_at"), "your cars");
+  const ids = cars.map((c) => c.id);
+  if (!ids.length) return { cars, services: [], reminders: [], scans: [] };
+  const [services, reminders, scans] = await Promise.all([
+    supabase.from("service_records").select("*").in("vehicle_id", ids).order("done_on", { ascending: false }).limit(300),
+    supabase.from("reminders").select("*").in("vehicle_id", ids).order("due_on", { ascending: true, nullsFirst: false }).limit(300),
+    supabase.from("scans").select("*").in("vehicle_id", ids).order("created_at", { ascending: false }).limit(60),
   ]);
-  return { cars: ok(cars, "your cars"), services: ok(services, "service history"), reminders: ok(reminders, "reminders"), scans: ok(scans, "scans") };
+  return { cars, services: ok(services, "service history"), reminders: ok(reminders, "reminders"), scans: ok(scans, "scans") };
 }
 
 export async function saveCar(uid, car) {
@@ -211,7 +214,7 @@ export function reminderTemplates(unit = "km") {
 
 // ---- Documents & warranty (per car)
 export async function loadDocuments(uid) {
-  return ok(await supabase.from("vehicle_documents").select("*").eq("owner_id", uid).order("expires_on", { ascending: true, nullsFirst: false }), "documents");
+  return ok(await supabase.from("vehicle_documents").select("*").order("expires_on", { ascending: true, nullsFirst: false }), "documents");
 }
 export async function addDocument(uid, d) {
   return ok(await supabase.from("vehicle_documents").insert({
@@ -229,13 +232,14 @@ export async function saveTrip(uid, t) {
     owner_id: uid, vehicle_id: t.vehicle_id || null, origin: (t.origin || "").slice(0, 120), destination: (t.destination || "").slice(0, 120),
     distance_km: Math.round((t.distance_km || 0) * 100) / 100, duration_sec: Math.round(t.duration_sec || 0), alerts: t.alerts || 0,
     real_route: !!t.real_route, completed: !!t.completed,
+    ...(t.score != null ? { score: t.score, hard_brakes: t.hard_brakes || 0, speeding_sec: t.speeding_sec || 0, night: !!t.night, purpose: t.purpose === "work" ? "work" : "personal" } : {}),
   }).select().single(), "trip");
 }
 export async function clearTrips(uid) { ok(await supabase.from("trips").delete().eq("owner_id", uid), "trips"); }
 
 // ---- Fuel log
 export async function loadFuel(uid) {
-  return ok(await supabase.from("fuel_logs").select("*").eq("owner_id", uid).order("odometer", { ascending: false }).limit(500), "fuel log");
+  return ok(await supabase.from("fuel_logs").select("*").order("odometer", { ascending: false }).limit(500), "fuel log");
 }
 export async function addFuel(uid, f, currency) {
   return ok(await supabase.from("fuel_logs").insert({
@@ -307,3 +311,100 @@ export async function loadRecalls(car) {
   if (!res.ok) throw new Error("Couldn't check recalls right now.");
   return ((await res.json()).results || []).map((r) => ({ id: r.NHTSACampaignNumber, component: r.Component, summary: r.Summary, consequence: r.Consequence, remedy: r.Remedy, date: r.ReportReceivedDate }));
 }
+
+
+// ---- Shared cars
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export async function createInvite(uid, vehicleId) {
+  const code = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => CODE_CHARS[b % CODE_CHARS.length]).join("");
+  ok(await supabase.from("vehicle_invites").insert({ code, vehicle_id: vehicleId, created_by: uid }), "invite");
+  return code;
+}
+export async function redeemInvite(code) { return ok(await supabase.rpc("redeem_vehicle_invite", { p_code: code }), "invite"); }
+export async function loadMembers(vehicleId) { return ok(await supabase.from("vehicle_members").select("member_id, created_at, member:profiles!vehicle_members_member_id_fkey(name)").eq("vehicle_id", vehicleId), "sharing"); }
+export async function removeMember(vehicleId, memberId) { ok(await supabase.from("vehicle_members").delete().eq("vehicle_id", vehicleId).eq("member_id", memberId), "sharing"); }
+
+// ---- Mechanic quotes
+export async function loadMyQuoteRequests(uid) {
+  return ok(await supabase.from("quote_requests").select("*, offers:quote_offers(*, provider:profiles!quote_offers_provider_id_fkey(name, city))").eq("owner_id", uid).order("created_at", { ascending: false }).limit(30), "quotes");
+}
+export async function loadOpenJobs(uid) {
+  return ok(await supabase.from("quote_requests").select("*, mine:quote_offers(id, price, currency, status, provider_id)").eq("status", "open").neq("owner_id", uid).order("created_at", { ascending: false }).limit(50), "jobs");
+}
+export async function requestQuote(uid, r) {
+  return ok(await supabase.from("quote_requests").insert({ owner_id: uid, vehicle_id: r.vehicle_id || null, car: (r.car || "").slice(0, 120), description: r.description.trim(), country: r.country || "", city: (r.city || "").slice(0, 60) }).select().single(), "quote request");
+}
+export async function closeQuoteRequest(id) { ok(await supabase.from("quote_requests").update({ status: "closed" }).eq("id", id), "quote request"); }
+export async function sendOffer(uid, o) {
+  return ok(await supabase.from("quote_offers").insert({ request_id: o.request_id, provider_id: uid, listing_id: o.listing_id || null, price: o.price === "" || o.price == null ? null : Number(o.price), currency: o.currency, message: (o.message || "").trim().slice(0, 1000) }).select().single(), "quote");
+}
+export async function acceptOffer(offer) {
+  ok(await supabase.from("quote_offers").update({ status: "accepted" }).eq("id", offer.id), "quote");
+  ok(await supabase.from("quote_requests").update({ status: "accepted" }).eq("id", offer.request_id), "quote request");
+}
+export async function myServiceListing(uid) {
+  const rows = ok(await supabase.from("listings").select("id, country").eq("seller_id", uid).eq("kind", "service").eq("status", "active").limit(1), "listings");
+  return rows[0] || null;
+}
+
+// ---- Motiq Pro
+export const isPro = (me) => !!me && me.plan === "pro" && (!me.pro_until || new Date(me.pro_until) > new Date());
+export async function startProCheckout(months) {
+  const returnTo = /^https:/.test(window.location.origin) ? `${window.location.origin}/?pro=done` : undefined;
+  const { data, error } = await supabase.functions.invoke("paystack-init", { body: { months, returnTo } });
+  if (error) { let msg = "Couldn't start the payment."; try { const b = await error.context.json(); if (b && b.error) msg = b.error; } catch (e) {} throw new Error(msg); }
+  return data;
+}
+
+// ---- Admin
+export async function adminStats() { return ok(await supabase.rpc("admin_stats"), "stats"); }
+export async function adminReports() {
+  return ok(await supabase.from("listing_reports").select("id, reason, details, created_at, listing:listings(id, title, status, seller_id)").order("created_at", { ascending: false }).limit(60), "reports");
+}
+export async function adminErrors() { return ok(await supabase.from("client_errors").select("*").order("created_at", { ascending: false }).limit(40), "errors"); }
+export async function adminSetListingStatus(id, status) { ok(await supabase.from("listings").update({ status }).eq("id", id), "listing"); }
+
+// ---- Fuel prices reported by drivers (last 14 days), around a point
+const box = (at, km) => { const d = km / 111; const dl = d / Math.max(0.2, Math.cos((at.lat * Math.PI) / 180)); return { latMin: at.lat - d, latMax: at.lat + d, lonMin: at.lon - dl, lonMax: at.lon + dl }; };
+export async function loadFuelPrices(at, km = 15) {
+  const b = box(at, km);
+  return ok(await supabase.from("fuel_prices").select("id, reporter_id, station_key, station_name, lat, lon, fuel, price, currency, created_at")
+    .gte("lat", b.latMin).lte("lat", b.latMax).gte("lon", b.lonMin).lte("lon", b.lonMax).order("created_at", { ascending: false }).limit(300), "fuel prices");
+}
+export async function reportFuelPrice(uid, p) {
+  return ok(await supabase.from("fuel_prices").insert({ reporter_id: uid, station_key: String(p.station_key).slice(0, 60), station_name: (p.station_name || "").slice(0, 120), lat: p.lat, lon: p.lon, country: p.country || "", fuel: p.fuel, price: Number(p.price), currency: p.currency }).select().single(), "fuel price");
+}
+
+// ---- Road alerts reported by drivers
+export const ROAD_ALERTS = [["pothole", "Pothole"], ["flood", "Flooding"], ["accident", "Crash"], ["roadworks", "Roadworks"], ["breakdown", "Broken-down car"], ["hazard", "Something on the road"]];
+export async function loadRoadAlerts(at, km = 25) {
+  const b = box(at, km);
+  return ok(await supabase.from("road_alerts").select("id, reporter_id, kind, lat, lon, note, still_there, gone, created_at, expires_at")
+    .gte("lat", b.latMin).lte("lat", b.latMax).gte("lon", b.lonMin).lte("lon", b.lonMax).order("created_at", { ascending: false }).limit(200), "road alerts");
+}
+export async function reportRoadAlert(uid, a) {
+  return ok(await supabase.from("road_alerts").insert({ reporter_id: uid, kind: a.kind, lat: a.lat, lon: a.lon, note: (a.note || "").slice(0, 140) }).select().single(), "road alert");
+}
+export async function voteRoadAlert(id, still) { ok(await supabase.rpc("vote_road_alert", { p_alert: id, p_still: still }), "road alert"); }
+
+// ---- Trips: work or personal
+export async function updateTrip(id, patch) { return ok(await supabase.from("trips").update(patch).eq("id", id).select().single(), "trip"); }
+
+// ---- Ride-hailing earnings
+export async function loadEarnings(uid) { return ok(await supabase.from("driver_earnings").select("*").eq("owner_id", uid).order("earned_on", { ascending: false }).limit(400), "earnings"); }
+export async function addEarning(uid, e) {
+  return ok(await supabase.from("driver_earnings").insert({ owner_id: uid, earned_on: e.earned_on, platform: (e.platform || "").slice(0, 30), amount: Number(e.amount), currency: e.currency, rides: e.rides === "" || e.rides == null ? null : Number(e.rides), note: (e.note || "").slice(0, 200) }).select().single(), "earnings");
+}
+export async function deleteEarning(id) { ok(await supabase.from("driver_earnings").delete().eq("id", id), "earnings"); }
+
+// ---- Is this price fair?
+export async function jobPriceStats(text, country, currency) {
+  const words = [...new Set(String(text).toLowerCase().match(/[a-zÀ-ɏ]{4,}/g) || [])].filter((w) => !["with", "when", "that", "this", "have", "need", "change", "replace", "replaced", "car's", "from", "they", "what"].includes(w)).slice(0, 3);
+  if (!words.length) return { count: 0 };
+  return ok(await supabase.rpc("job_price_stats", { p_words: words, p_country: country || "", p_currency: currency }), "prices");
+}
+
+// ---- Invite friends
+export async function myReferralCode() { return ok(await supabase.rpc("my_referral_code"), "invite code"); }
+export async function redeemReferral(code) { return ok(await supabase.rpc("redeem_referral", { p_code: code }), "invite code"); }
+export async function loadReferrals(uid) { return ok(await supabase.from("referrals").select("referred_id, created_at").eq("referrer_id", uid), "invites"); }

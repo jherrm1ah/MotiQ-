@@ -1,9 +1,27 @@
 // Profile: who you are, your stats, and settings (account, appearance, units, alerts, music,
 // documents & warranty, privacy, help). Also the first-run welcome where you pick your country.
 import React, { useState } from "react";
-import { User, Sun, Moon, Gauge, Bell, Music2, FileText, Shield, HelpCircle, ChevronRight, LogOut, Mail, Plus, Trash2, ShieldCheck, Loader2, Car } from "lucide-react";
+import { Globe, Wallet, User, Sun, Moon, Gauge, Bell, Music2, FileText, Shield, HelpCircle, ChevronRight, LogOut, Mail, Plus, Trash2, ShieldCheck, Loader2, Car } from "lucide-react";
+import { t } from "../lib/i18n.js";
 import { useTheme, useUI, RED, AMBER, GREEN, ACCENT, Field, Pill, PrimaryButton, SecondaryButton, ToggleRow, Stat, TrackThumb, Logo, carLabel } from "../design.jsx";
 import { saveProfile, clearAiHistory, addDocument, deleteDocument, unblockUser } from "../lib/data.js";
+import { LanguagePicker, ExpensesSheet, ProCard } from "./ProfileExtras.jsx";
+import { WeeklySheet, InviteSheet, EarningsSheet } from "./Daily.jsx";
+import { CalendarDays, Briefcase, Gift } from "lucide-react";
+
+// Ride-hailing driver mode: shows today's profit on Home and tracks earnings against costs.
+function DriverModeSheet() {
+  const { me, setMe, showToast } = useUI();
+  const { SUB } = useTheme();
+  const toggle = async (v) => { try { setMe(await saveProfile(me.id, { driver_mode: v })); } catch (e) { showToast(/driver_mode/.test(e.message) ? "Driver mode needs one more setup step in the database." : e.message); } };
+  return (
+    <div className="flex flex-col gap-4">
+      <ToggleRow label="I drive for Uber, Bolt, inDrive or a taxi" on={!!me.driver_mode} onChange={toggle} />
+      <p className="text-xs leading-relaxed" style={{ color: SUB }}>Home then shows today's profit: what you earned minus fuel and repairs logged in Motiq.</p>
+      {me.driver_mode && <EarningsSheet />}
+    </div>
+  );
+}
 import { canNotify, askNotificationPermission, syncReminders } from "../lib/notify.js";
 import { COUNTRIES, CURRENCIES, defaultsFor, guessCountry, countryName, daysUntil, dateLabel } from "../lib/units.js";
 
@@ -170,6 +188,10 @@ function AlertsPicker() {
       {row("Fault codes from scans", "alertsScans")}
       {row("Documents about to expire", "alertsDocuments")}
       {row("Trip alerts", "alertsTrips")}
+      <ToggleRow label="Start trips automatically when I drive (while Motiq is open)" on={!!prefs.autoTrips} onChange={(v) => setPrefs({ ...prefs, autoTrips: v })} />
+      <ToggleRow label="Morning car check on my phone" on={!!prefs.morningCheck} onChange={(v) => setPrefs({ ...prefs, morningCheck: v })} />
+      {prefs.morningCheck && <Field label="Time" type="time" value={prefs.morningTime || "07:30"} onChange={(e) => setPrefs({ ...prefs, morningTime: e.target.value })} />}
+      {row("Weekly summary on Sundays", "weeklySummary")}
       <p className="text-xs leading-relaxed" style={{ color: SUB }}>These show in the bell on Home.{canNotify() ? " In the app, Motiq also reminds you on your phone: 3 days before a service is due and 2 weeks before a document expires." : " Phone reminders work in the Motiq Android app."}</p>
       {canNotify() && <PrimaryButton onClick={async () => { const ok = await askNotificationPermission(); if (ok) { await syncReminders({ vehicles: garage.cars, reminders: garage.reminders, documents, prefs }); showToast("Phone reminders are on"); } else showToast("Allow notifications for Motiq in your phone's settings"); }}><Bell size={15} /> Turn on phone reminders</PrimaryButton>}
     </div>
@@ -231,7 +253,7 @@ function HelpSheet() {
 }
 
 export default function Profile() {
-  const { me, email: authEmail, vehicles, garage, openSheet, closeSheet, confirm, signOut } = useUI();
+  const { me, email: authEmail, vehicles, garage, openSheet, closeSheet, confirm, signOut, goTo } = useUI();
   const theme = useTheme();
   const { CARD, TEXT, SUB, BORDER, FILL } = theme;
   const since = me.created_at ? new Date(me.created_at).toLocaleDateString(undefined, { month: "short", year: "2-digit" }).replace(" ", " '") : "—";
@@ -240,11 +262,17 @@ export default function Profile() {
     ["Appearance", theme.mode === "dark" ? Moon : Sun, () => <AppearancePicker />],
     ["Units", Gauge, () => <UnitsPicker />],
     ["Notifications", Bell, () => <AlertsPicker />],
+    ["Language", Globe, () => <LanguagePicker />],
+    ["Costs & expenses", Wallet, () => <ExpensesSheet />],
+    ["Your week", CalendarDays, () => <WeeklySheet />],
+    ["Driver earnings (Uber, Bolt…)", Briefcase, () => <DriverModeSheet />],
+    ["Invite friends", Gift, () => <InviteSheet />],
     ["Music & media", Music2, () => <MusicInfo />],
     ["Documents & warranty", FileText, () => <DocumentsSheet />],
     ["Privacy & security", Shield, () => <PrivacySheet />],
     ["Help & support", HelpCircle, () => <HelpSheet />],
   ];
+  if (me.is_admin) items.push(["Admin", ShieldCheck, null]);
   return (
     <div className="flex flex-col gap-6 px-5 pt-2" style={{ paddingBottom: 120 }}>
       <div className="flex flex-col items-center gap-3 pt-4 text-center">
@@ -263,15 +291,16 @@ export default function Profile() {
           </div>
         ))}
       </div>
+      <ProCard />
       <div style={{ borderRadius: 24, backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
         {items.map(([label, Icon, body], i) => (
-          <button key={label} onClick={() => openSheet(label, body())} className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors" style={i !== items.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
-            <Icon size={16} style={{ color: SUB }} /><span className="flex-1 text-sm" style={{ color: TEXT }}>{label}</span><ChevronRight size={15} style={{ color: SUB }} />
+          <button key={label} onClick={() => (body ? openSheet(t(label), body()) : goTo("admin"))} className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors" style={i !== items.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
+            <Icon size={16} style={{ color: SUB }} /><span className="flex-1 text-sm" style={{ color: TEXT }}>{t(label)}</span><ChevronRight size={15} style={{ color: SUB }} />
           </button>
         ))}
       </div>
       <button onClick={() => confirm("Sign out?", "You'll need to sign back in to see your garage and history.", "Sign out", signOut)} className="flex items-center justify-center gap-2 py-4 text-sm font-medium active:scale-95 transition-transform" style={{ borderRadius: 24, backgroundColor: CARD, border: `1px solid ${BORDER}`, color: RED }}>
-        <LogOut size={15} /> Sign out
+        <LogOut size={15} /> {t("Sign out")}
       </button>
       <p className="text-center" style={{ fontSize: 10, color: SUB }}>Motiq's advice is a guide, not a replacement for a qualified mechanic.</p>
     </div>

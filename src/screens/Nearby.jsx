@@ -2,6 +2,7 @@
 // Motiq market where people sell parts, services and cars.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, MapPin, Clock, Phone, Globe, ChevronRight, Navigation, LocateFixed, Loader2, Store, Plus, MessageCircle, Send, Package, Wrench, Car as CarIcon, Inbox, X, Camera, ArrowLeft, RefreshCw, Flag, Ban } from "lucide-react";
+import { t } from "../lib/i18n.js";
 import { supabase } from "../lib/supabase.js";
 import { useTheme, useUI, RED, AMBER, GREEN, GlowIcon, Pill, Field, PrimaryButton, SecondaryButton, Empty, Card, ScreenHeader, RoundButton, Skeleton, fmtDist } from "../design.jsx";
 import { PLACE_CATEGORIES, findPlaces } from "../lib/places.js";
@@ -10,6 +11,7 @@ import { loadListings, saveListing, setListingStatus, uploadPhoto, listingPhotoU
 import { money, countryName, CURRENCIES, dateLabel } from "../lib/units.js";
 import { PLACE_ICONS } from "./Home.jsx";
 import PlaceMap from "./PlaceMap.jsx";
+import QuotesView from "./Quotes.jsx";
 
 const openExternal = (url) => { const w = window.open(url, "_blank", "noopener"); if (!w) window.location.href = url; };
 
@@ -21,12 +23,12 @@ export default function Nearby() {
     <div className="flex flex-col gap-5 px-5 pt-2" style={{ paddingBottom: 120 }}>
       <div className="flex items-end justify-between gap-3 pt-2">
         <div className="min-w-0">
-          <h1 className="font-bold tracking-tight" style={{ fontSize: 20, color: TEXT }}>{tab === "places" ? "Nearby Help" : "Market"}</h1>
+          <h1 className="font-bold tracking-tight" style={{ fontSize: 20, color: TEXT }}>{tab === "places" ? t("Nearby Help") : t("Market")}</h1>
           <p className="mt-0.5 text-sm" style={{ color: SUB }}>{tab === "places" ? "Find and get directions to help near you" : "Parts, services and cars from people near you"}</p>
         </div>
       </div>
       <div className="flex items-center gap-1 self-start rounded-full p-1" role="tablist" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
-        {[["places", "Places"], ["market", "Market"]].map(([k, l]) => (
+        {[["places", t("Places")], ["market", t("Market")]].map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className="rounded-full px-4 py-1.5 text-xs font-semibold transition-all" style={{ backgroundColor: tab === k ? FILL : "transparent", color: tab === k ? FILL_TEXT : SUB }}>{l}</button>
         ))}
       </div>
@@ -197,6 +199,7 @@ function Market() {
     let off = false;
     const t = setTimeout(async () => {
       try {
+        if (view === "quotes") return;
         if (view === "inbox") { const x = await loadInbox(me.id); if (!off) setInbox(x.filter((c) => !blocks.includes(c.buyer_id === me.id ? c.seller_id : c.buyer_id))); }
         else { const x = await loadListings(view === "mine" ? { mine: true, uid: me.id } : { kind, q, fitsMake: fits && vehicle ? vehicle.make : "" }); if (!off) setList(x.filter((l) => !blocks.includes(l.seller_id))); }
       } catch (e) { if (!off) { showToast(e.message); setList([]); setInbox([]); } }
@@ -216,7 +219,7 @@ function Market() {
     <>
       <div className="flex items-center justify-between gap-2">
         <div className="no-scrollbar flex gap-2 overflow-x-auto">
-          {[["browse", "Browse"], ["mine", "My listings"], ["inbox", `Messages${unread ? ` (${unread})` : ""}`]].map(([v, l]) => <Pill key={v} small active={view === v} onClick={() => setView(v)}>{l}</Pill>)}
+          {[["browse", "Browse"], ["quotes", t("Get quotes")], ["mine", "My listings"], ["inbox", `Messages${unread ? ` (${unread})` : ""}`]].map(([v, l]) => <Pill key={v} small active={view === v} onClick={() => setView(v)}>{l}</Pill>)}
         </div>
         <RoundButton icon={Plus} label="Sell something" fill onClick={newListing} />
       </div>
@@ -236,7 +239,7 @@ function Market() {
         </>
       )}
 
-      {view === "inbox" ? (
+      {view === "quotes" ? <QuotesView onChat={setChat} /> : view === "inbox" ? (
         !inbox ? <Loading /> : inbox.length === 0 ? <Empty icon={Inbox} title="No messages yet" text="When you message a seller, or someone asks about your listing, it shows up here." /> : (
           <div className="flex flex-col gap-2.5">
             {inbox.map((c) => (
