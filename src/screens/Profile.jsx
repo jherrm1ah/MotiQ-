@@ -2,7 +2,7 @@
 // documents & warranty, privacy, help). Also the first-run welcome where you pick your country.
 import React, { useState } from "react";
 import { User, Sun, Moon, Gauge, Bell, Music2, FileText, Shield, HelpCircle, ChevronRight, LogOut, Mail, Plus, Trash2, ShieldCheck, Loader2, Car } from "lucide-react";
-import { useTheme, useUI, RED, AMBER, GREEN, ACCENT, Field, Pill, PrimaryButton, SecondaryButton, ToggleRow, Stat, TrackThumb, GlowIcon, carLabel } from "../design.jsx";
+import { useTheme, useUI, RED, AMBER, GREEN, ACCENT, Field, Pill, PrimaryButton, SecondaryButton, ToggleRow, Stat, TrackThumb, Logo, carLabel } from "../design.jsx";
 import { saveProfile, clearAiHistory, addDocument, deleteDocument } from "../lib/data.js";
 import { COUNTRIES, CURRENCIES, defaultsFor, guessCountry, countryName, daysUntil, dateLabel } from "../lib/units.js";
 
@@ -47,7 +47,7 @@ export function Welcome() {
   const { TEXT, SUB, CARD, BORDER } = useTheme();
   return (
     <div className="flex flex-col gap-5 px-5 pb-10 pt-10">
-      <GlowIcon icon={Car} glow={ACCENT} size={22} />
+      <Logo size={48} />
       <div>
         <h1 className="font-bold tracking-tight" style={{ fontSize: 24, color: TEXT }}>Welcome to Motiq{me.name ? `, ${me.name.split(" ")[0]}` : ""}</h1>
         <p className="mt-1 text-sm" style={{ color: SUB }}>Two quick things so prices and distances look right.</p>

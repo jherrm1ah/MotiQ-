@@ -1,7 +1,7 @@
 // Motiq's root: sign-in, loading the driver's garage, and the app-wide state that has to survive
 // moving between screens (the OBD-II connection, a live trip, the music player, sheets and toasts).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Car, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
 import { loadProfile, loadGarage, loadDocuments, loadTrips, saveTrip, healthOf, reminderState } from "./lib/data.js";
 import { connectAdapter, readLive } from "./lib/obd.js";
@@ -9,7 +9,7 @@ import { currentPosition, geocode, drivingRoute } from "./lib/geo.js";
 import { speak as speakText, stopSpeaking } from "./lib/voice.js";
 import { daysUntil } from "./lib/units.js";
 import {
-  ACCENT, AMBER, THEMES, ThemeContext, UIContext, GlowIcon, Sheet, Toast, ErrorBoundary,
+  Logo, AMBER, THEMES, ThemeContext, UIContext, Sheet, Toast, ErrorBoundary,
   PrimaryButton, SecondaryButton, useLocalState, haversineKm, local,
 } from "./design.jsx";
 import BottomNav from "./screens/BottomNav.jsx";
@@ -297,7 +297,7 @@ function Motiq() {
     </UIContext.Provider>
   );
 
-  if (session === undefined) return frame(<Splash />, "#000");
+  if (session === undefined) return frame(<Splash />, "#212121");
   if (!session) {
     return frame(
       authStep === "login" ? <LoginScreen onCreateAccount={() => setAuthStep("signup")} onToast={showToast} />
@@ -341,5 +341,5 @@ function Motiq() {
 }
 
 function Splash() {
-  return <div className="flex h-full w-full items-center justify-center" style={{ backgroundColor: "#000" }}><GlowIcon icon={Car} glow={ACCENT} size={28} /></div>;
+  return <div className="flex h-full w-full items-center justify-center" style={{ backgroundColor: "#212121" }}><Logo size={72} /></div>;
 }

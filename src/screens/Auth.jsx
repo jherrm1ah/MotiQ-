@@ -1,9 +1,9 @@
 // Welcome, sign in and create account. A fixed light palette on purpose: this is the brand
 // moment before you're inside the app (the Appearance setting applies once signed in).
 import React, { useState } from "react";
-import { Gauge, Play, ChevronsRight, ArrowLeft, Eye, EyeOff, Mail, Check, Loader2 } from "lucide-react";
+import { Play, ChevronsRight, ArrowLeft, Eye, EyeOff, Mail, Check, Loader2 } from "lucide-react";
 import { supabase } from "../lib/supabase.js";
-import { ACCENT } from "../design.jsx";
+import { ACCENT, Logo } from "../design.jsx";
 
 const AUTH = { bg: "#E0E0E0", card: "#FFFFFF", field: "#F5F5F5", border: "#E0E0E0", text: "#212121", sub: "#616161", fill: "#212121", fillText: "#FFFFFF", bad: "#C62828" };
 const redirectTo = () => (window.location.protocol.startsWith("http") ? window.location.origin : undefined);
@@ -12,7 +12,7 @@ export function HeroScreen({ onStart }) {
   return (
     <div className="relative flex h-full flex-col overflow-hidden" style={{ backgroundColor: "#212121", paddingTop: "env(safe-area-inset-top, 0px)" }}>
       <div className="flex items-center gap-2 px-6 pt-8">
-        <Gauge size={14} style={{ color: "#fff" }} />
+        <Logo size={26} />
         <span className="font-semibold uppercase text-white" style={{ letterSpacing: "0.15em", fontSize: 11 }}>Motiq AI</span>
       </div>
       <div className="flex-1 px-6 pt-16">
@@ -91,7 +91,7 @@ function EmailLinkRow({ email, onToast }) {
 
 const Brand = ({ size = 18 }) => (
   <div className="flex items-center gap-1.5">
-    <Gauge size={size} style={{ color: AUTH.text }} />
+    <Logo size={size + 8} />
     <span className="font-bold" style={{ color: AUTH.text, fontSize: size }}>Motiq <span style={{ backgroundColor: ACCENT, padding: "0 5px", borderRadius: 5 }}>AI</span></span>
   </div>
 );

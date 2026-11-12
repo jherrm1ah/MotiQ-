@@ -99,6 +99,11 @@ export const SOURCE_STYLE = {
 };
 
 // ---- Building blocks
+// The Motiq logo (white tile with the black mark).
+export function Logo({ size = 28 }) {
+  return <img src="/icon-192.png" alt="Motiq" width={size} height={size} className="shrink-0" style={{ width: size, height: size, borderRadius: size * 0.22 }} />;
+}
+
 export function GlowIcon({ icon: Icon, glow, size = 22 }) {
   return (
     <div className="flex shrink-0 items-center justify-center rounded-2xl" style={{ width: size + 26, height: size + 26, backgroundColor: `${glow}1F` }}>
