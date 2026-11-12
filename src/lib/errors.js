@@ -2,7 +2,7 @@
 // beyond the signed-in account), so problems show up on the admin page before anyone reports them.
 import { supabase } from "./supabase.js";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const sent = new Set();
 let count = 0;
 let screen = "";

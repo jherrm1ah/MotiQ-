@@ -1,6 +1,6 @@
 // Home: the selected car at a glance (health, fault codes, what's due, live OBD data, trips)
 // and quick ways into everything else. Every number here comes from the driver's real data.
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import {
   Bell, ChevronRight, Search, SlidersHorizontal, Camera, Car, Bluetooth, BluetoothConnected, Navigation, Music2,
   Timer, ShieldAlert, AlertTriangle, ScanLine, CircleDot, FileText, Wrench, Package, Droplets, BatteryCharging, Building2, Fuel, Zap, Plus,
@@ -13,6 +13,7 @@ import {
 import { reminderState } from "../lib/data.js";
 import { daysUntil, dateLabel } from "../lib/units.js";
 import { CarForm, ReminderForm, ServiceForm, OBDConnectSheet } from "./Garage.jsx";
+import { TodayCard, DailyTools, ScoreCard, WeeklyCard, SosButton, SosSheet } from "./Daily.jsx";
 
 export const PLACE_ICONS = {
   Mechanics: [Wrench, ACCENT], "Auto parts": [Package, BLUE], Tyres: [CircleDot, RED], Batteries: [BatteryCharging, PURPLE],
@@ -113,10 +114,11 @@ export default function Home() {
           <h1 className="font-bold tracking-tight" style={{ fontSize: 22, color: TEXT }}>{t("Hi")}{firstName ? `, ${firstName}` : ""}</h1>
           <p className="mt-0.5 text-sm" style={{ color: SUB }}>{t(codes.length ? "Your car needs a look." : vehicle.healthInfo.overdue.length ? "Something's overdue." : "Here's your car today.")}</p>
         </div>
+        <div className="flex shrink-0 items-center gap-2"><SosButton />
         <button onClick={() => openSheet("Notifications", <Notifications items={notifications} />)} className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full active:scale-95 transition-transform" style={{ backgroundColor: CARD }} aria-label={`Notifications${notifications.length ? ` (${notifications.length})` : ""}`}>
           <Bell size={16} style={{ color: TEXT }} />
           {notifications.length > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full" style={{ backgroundColor: notifications.some((n) => n.color === RED) ? RED : ACCENT }} />}
-        </button>
+        </button></div>
       </div>
 
       {vehicles.length > 1 && (
@@ -175,6 +177,11 @@ export default function Home() {
           status={trip.status === "active" && trip.free ? `${fmtDist(trip.coveredKm, unit, 1)}` : trip.status === "active" ? `${fmtDist(Math.max(0, trip.totalKm - trip.coveredKm), unit, 0)} to go` : trip.status === "arrived" ? "Arrived" : trip.status === "locating" ? "…" : t("Start")} color={tripLive ? (mode === "light" ? "#6B7500" : ACCENT) : null} onClick={() => goTo("trip")} />
         <QuickTile icon={Music2} label={t("Car Mode")} aria="Car Mode Radio" status={t("Radio & voice")} onClick={() => goTo("music")} />
       </div>
+
+      <TodayCard />
+      <DailyTools />
+      <ScoreCard />
+      <WeeklyCard />
 
       {connectedHere && (
         <div className="rounded-3xl p-3.5" style={{ backgroundColor: "rgba(61,220,132,0.1)", border: `1px solid ${BORDER}` }}>

@@ -3,7 +3,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
-import { loadProfile, loadGarage, loadDocuments, loadTrips, loadFuel, loadBlocks, saveTrip, healthOf, reminderState } from "./lib/data.js";
+import { loadProfile, loadGarage, loadDocuments, loadTrips, loadFuel, loadBlocks, saveTrip, healthOf, reminderState, loadEarnings, loadRoadAlerts, ROAD_ALERTS } from "./lib/data.js";
+import { tripScore, SPEEDING_KMH } from "./lib/daily.js";
 import { syncReminders } from "./lib/notify.js";
 import { connectAdapter, readLive } from "./lib/obd.js";
 import { currentPosition, geocode, drivingRoute } from "./lib/geo.js";
@@ -25,9 +26,10 @@ import MusicScreen, { MiniPlayer, CarMode } from "./screens/Music.jsx";
 import ScanScreen from "./screens/Scan.jsx";
 import Dashboard from "./screens/Dashboard.jsx";
 import AdminScreen from "./screens/Admin.jsx";
+import { SosSheet } from "./screens/Daily.jsx";
 import { setLanguage } from "./lib/i18n.js";
 
-const IDLE_TRIP = { free: false, still: 0, status: "idle", origin: "", destination: "", totalKm: 0, coveredKm: 0, kmh: 0, elapsedSec: 0, alerts: [], gps: "pending", route: null, realRoute: false, offRoute: false, dest: null };
+const IDLE_TRIP = { free: false, still: 0, hardBrakes: 0, speedingSec: 0, purpose: "personal", pos: null, warnedRoad: [], status: "idle", origin: "", destination: "", totalKm: 0, coveredKm: 0, kmh: 0, elapsedSec: 0, alerts: [], gps: "pending", route: null, realRoute: false, offRoute: false, dest: null };
 
 // Next open reminder for a car, e.g. { title: "Oil and filter change", when: "in 12 days" }.
 function nextDueOf(car, reminders, unit) {
@@ -54,6 +56,7 @@ function Motiq() {
   const [documents, setDocuments] = useState([]);
   const [trips, setTrips] = useState([]);
   const [fuel, setFuel] = useState([]);
+  const [earnings, setEarnings] = useState([]);
   const [blocks, setBlocks] = useState([]);
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine !== false));
   const [fromCache, setFromCache] = useState(false);
@@ -82,8 +85,8 @@ function Motiq() {
   const reload = useCallback(async () => {
     if (!uid) return;
     try {
-      const [p, g, d, t, f, b] = await Promise.all([loadProfile(uid), loadGarage(uid), loadDocuments(uid).catch(() => []), loadTrips(uid).catch(() => []), loadFuel(uid).catch(() => []), loadBlocks(uid).catch(() => [])]);
-      setMe(p); setGarage(g); setDocuments(d); setTrips(t); setFuel(f); setBlocks(b); setLoadError(""); setFromCache(false);
+      const [p, g, d, t, f, b, e] = await Promise.all([loadProfile(uid), loadGarage(uid), loadDocuments(uid).catch(() => []), loadTrips(uid).catch(() => []), loadFuel(uid).catch(() => []), loadBlocks(uid).catch(() => []), loadEarnings(uid).catch(() => [])]);
+      setEarnings(e); setMe(p); setGarage(g); setDocuments(d); setTrips(t); setFuel(f); setBlocks(b); setLoadError(""); setFromCache(false);
       local.set(`motiq.cache.${uid}`, { p, g, d, t, f, b, at: Date.now() });
     } catch (e) {
       const c = local.get(`motiq.cache.${uid}`, null);
@@ -201,8 +204,28 @@ function Motiq() {
   }
   useEffect(() => () => { liveRun.current++; if (linkRef.current) linkRef.current.close(); }, []);
 
+  // Android home-screen widget: com.orynthra.motiq://open/trip (or /home, /garage...).
+  useEffect(() => {
+    if (!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())) return;
+    let h;
+    const handle = (url) => {
+      const m = /^com\.orynthra\.motiq:\/\/open\/([a-z]+)/.exec(url || "");
+      if (m && ["home", "trip", "garage", "nearby", "ai", "sos", "dash"].includes(m[1])) goTo(m[1] === "sos" ? "home" : m[1]);
+      if (m && m[1] === "sos") setSosRequest(Date.now());
+    };
+    import("@capacitor/app").then(async ({ App: CapApp }) => {
+      h = await CapApp.addListener("appUrlOpen", ({ url }) => handle(url));
+      const launch = await CapApp.getLaunchUrl().catch(() => null);
+      if (launch && launch.url) handle(launch.url);
+    }).catch(() => {});
+    return () => { h && h.remove(); };
+  }, []);
+  const [sosRequest, setSosRequest] = useState(0);
+  useEffect(() => { if (sosRequest) setTimeout(() => openSheet("SOS", <SosSheet />), 300); }, [sosRequest]);
+
   // ---- Trips: real GPS distance and speed, and a real route when the address is found.
   const [trip, setTrip] = useState(IDLE_TRIP);
+  const [parking, setParking] = useLocalState("motiq.parking", null);
   const [voiceAlerts, setVoiceAlerts] = useLocalState("motiq.voiceAlerts", true);
   const lastFix = useRef(null);
   const watchId = useRef(null);
@@ -226,9 +249,11 @@ function Motiq() {
     }
   }
   async function recordTrip(t, completed) {
+    if (t.pos) setParking({ lat: t.pos.lat, lon: t.pos.lon, at: Date.now(), vehicleId: vehicle ? vehicle.id : null, note: "", until: null });
     if (t.coveredKm < 0.05 || !uid) return;
     try {
-      const row = await saveTrip(uid, { vehicle_id: vehicle ? vehicle.id : null, origin: t.origin, destination: t.destination, distance_km: t.coveredKm, duration_sec: t.elapsedSec, alerts: t.alerts.length, real_route: t.realRoute, completed });
+      const sc = tripScore(t);
+      const row = await saveTrip(uid, { vehicle_id: vehicle ? vehicle.id : null, origin: t.origin, destination: t.destination, distance_km: t.coveredKm, duration_sec: t.elapsedSec, alerts: t.alerts.length, real_route: t.realRoute, completed, ...sc, purpose: t.purpose });
       setTrips((prev) => [row, ...prev]);
     } catch (e) { showToast("Couldn't save the trip"); }
   }
@@ -257,7 +282,10 @@ function Motiq() {
         lastFix.current = { lat, lon, t: now };
         kmh = Math.max(0, Math.min(250, kmh));
         const alerts = [...t.alerts];
-        if (t.kmh - kmh > 25 && t.kmh > 32) alerts.unshift({ id: `brake-${now}`, kind: "brake", title: "Hard braking detected", detail: "Keep a safe distance and stay alert.", at: t.elapsedSec, ts: now });
+        const hard = t.kmh - kmh > 25 && t.kmh > 32;
+        const dtSec = last ? Math.min(10, Math.max(0, (now - last.t) / 1000)) : 0;
+        const scoreBits = { hardBrakes: t.hardBrakes + (hard ? 1 : 0), speedingSec: t.speedingSec + (kmh > SPEEDING_KMH ? dtSec : 0), pos: { lat, lon } };
+        if (hard) alerts.unshift({ id: `brake-${now}`, kind: "brake", title: "Hard braking detected", detail: "Keep a safe distance and stay alert.", at: t.elapsedSec, ts: now });
         let offRoute = t.offRoute;
         if (t.route) {
           let min = Infinity;
@@ -269,13 +297,32 @@ function Motiq() {
         }
         // Auto trips have no destination: they end after 4 minutes standing still.
         const still = kmh < 3 ? (t.still || now) : 0;
-        if (t.free) return { ...t, coveredKm: covered, kmh, gps: "gps", alerts: alerts.slice(0, 12), still, status: still && now - still > 240000 ? "arrived" : "active" };
+        if (t.free) return { ...t, ...scoreBits, coveredKm: covered, kmh, gps: "gps", alerts: alerts.slice(0, 12), still, status: still && now - still > 240000 ? "arrived" : "active" };
         const arrived = (t.dest && haversineKm({ lat, lon }, t.dest) < 0.15) || covered >= t.totalKm * 1.02;
-        return { ...t, coveredKm: covered, kmh, gps: "gps", alerts: alerts.slice(0, 12), offRoute, status: arrived ? "arrived" : "active" };
+        return { ...t, ...scoreBits, coveredKm: covered, kmh, gps: "gps", alerts: alerts.slice(0, 12), offRoute, status: arrived ? "arrived" : "active" };
       });
     }, () => setTrip((t) => (t.status === "active" ? { ...t, gps: "off" } : t)), { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 });
     return () => { if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current); watchId.current = null; };
   }, [trip.status]);
+  // Road alerts from other drivers: loaded around you when a trip starts (and every 10 minutes),
+  // then spoken once when you're within about 400 m.
+  const [roadAlerts, setRoadAlerts] = useState([]);
+  const roadLoaded = useRef(0);
+  useEffect(() => {
+    if (trip.status !== "active" || !trip.pos || Date.now() - roadLoaded.current < 600000) return;
+    roadLoaded.current = Date.now();
+    loadRoadAlerts(trip.pos).then(setRoadAlerts).catch(() => {});
+  }, [trip.status, trip.pos]);
+  useEffect(() => { if (trip.status === "idle") roadLoaded.current = 0; }, [trip.status]);
+  useEffect(() => {
+    if (trip.status !== "active" || !trip.pos || !roadAlerts.length) return;
+    const near = roadAlerts.find((a) => !trip.warnedRoad.includes(a.id) && a.reporter_id !== uid && haversineKm(trip.pos, a) < 0.4);
+    if (!near) return;
+    const label = (ROAD_ALERTS.find((k) => k[0] === near.kind) || [0, "Hazard"])[1];
+    const metres = Math.round(haversineKm(trip.pos, near) * 1000 / 50) * 50;
+    setTrip((t) => ({ ...t, warnedRoad: [...t.warnedRoad, near.id], alerts: [{ id: `road-${near.id}`, kind: "road", roadId: near.id, title: `${label} ahead`, detail: `Reported by drivers about ${metres} m from you${near.note ? `: ${near.note}` : ""}.`, at: t.elapsedSec, ts: Date.now() }, ...t.alerts].slice(0, 12) }));
+  }, [trip.pos, roadAlerts]);
+
   const alertCount = useRef(0);
   useEffect(() => {
     if (trip.alerts.length > alertCount.current && trip.alerts[0]) { showToast(trip.alerts[0].title); speakAlert(`${trip.alerts[0].title}. ${trip.alerts[0].detail}`); }
@@ -358,7 +405,7 @@ function Motiq() {
     me, setMe, uid, email: session && session.user ? session.user.email : "", unit, garage, vehicles, vehicle, setCarId, documents, setDocuments, trips, setTrips, fuel, setFuel, blocks, setBlocks, online, reload, prefs, setPrefs,
     goTo, active, marketFilter, aiPrompt, clearAiPrompt: () => setAiPrompt(null), openSheet, closeSheet, confirm, showToast, signOut,
     obd, liveData, connectOBD, disconnectOBD, getLink: () => linkRef.current,
-    trip, startTrip, endTrip, dismissTrip, voiceAlerts, setVoiceAlerts,
+    trip, setTrip, startTrip, endTrip, dismissTrip, voiceAlerts, setVoiceAlerts, parking, setParking, sosRequest, setSosRequest, roadAlerts, setRoadAlerts, earnings, setEarnings,
     browseList, setBrowseList, current, isPlaying, carMode, setCarMode, queue, favorites, recentlyPlayed,
     playTrack, togglePlay, playAdjacent, addToQueue, removeFromQueue, toggleFavorite, isFavorite, duck, setIsPlaying,
   };

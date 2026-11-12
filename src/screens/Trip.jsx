@@ -3,7 +3,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Clock, Volume2, VolumeX, MapPin, Navigation, Loader2, Gauge, Timer, ShieldCheck, X, Check, Flag, AlertTriangle, Trash2 } from "lucide-react";
 import { useTheme, useUI, ACCENT, RED, AMBER, GREEN, ScreenHeader, RoundButton, SectionHeader, PrimaryButton, fmtDist, kmIn, distUnit, speedUnit } from "../design.jsx";
-import { clearTrips } from "../lib/data.js";
+import { clearTrips, updateTrip, voteRoadAlert } from "../lib/data.js";
+import { ReportRoadSheet, SosButton } from "./Daily.jsx";
+import { scoreColor, tripScore } from "../lib/daily.js";
+import { Briefcase, Download, ThumbsUp, ThumbsDown } from "lucide-react";
 
 const DEFAULT_PATH = "M 20 108 C 70 108 60 40 120 40 C 175 40 165 96 224 96 C 265 96 260 32 300 32";
 
@@ -39,8 +42,8 @@ function TripMap({ progress, color, track, route }) {
 }
 
 export function TripScreen({ onBack, onHistory }) {
-  const { CARD, CARD_ALT, TEXT, SUB, BORDER, FILL, RING_TRACK } = useTheme();
-  const { trip, startTrip, endTrip, dismissTrip, voiceAlerts, setVoiceAlerts, unit } = useUI();
+  const { CARD, CARD_ALT, TEXT, SUB, BORDER, FILL, FILL_TEXT, RING_TRACK } = useTheme();
+  const { trip, setTrip, startTrip, endTrip, dismissTrip, voiceAlerts, setVoiceAlerts, unit, openSheet, closeSheet } = useUI();
   const [origin, setOrigin] = useState("Current location");
   const [destination, setDestination] = useState("");
   const progress = trip.totalKm > 0 ? trip.coveredKm / trip.totalKm : 0;
@@ -78,6 +81,13 @@ export function TripScreen({ onBack, onHistory }) {
 
       {(trip.status === "active" || trip.status === "arrived") && (
         <>
+          <div className="flex items-center gap-2">
+            <div className="flex flex-1 items-center gap-1 rounded-full p-1" role="group" aria-label="Trip type" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
+              {[["personal", "Personal"], ["work", "Work"]].map(([k, l]) => <button key={k} aria-pressed={trip.purpose === k} onClick={() => setTrip((t) => ({ ...t, purpose: k }))} className="flex-1 rounded-full py-1.5 text-xs font-semibold" style={{ backgroundColor: trip.purpose === k ? FILL : "transparent", color: trip.purpose === k ? FILL_TEXT : SUB }}>{l}</button>)}
+            </div>
+            <button onClick={() => openSheet("Report a road problem", <ReportRoadSheet onDone={closeSheet} />)} className="flex h-10 items-center gap-1.5 rounded-full px-3 text-xs font-semibold" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}`, color: AMBER }} aria-label="Report a road problem"><AlertTriangle size={14} /> Report</button>
+            <SosButton />
+          </div>
           <div className="rounded-3xl p-4" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
             <div className="mb-2 flex items-center justify-between">
               <span className="flex items-center gap-1.5 text-xs" style={{ color: trip.gps === "gps" ? GREEN : trip.gps === "off" ? AMBER : SUB }}>
@@ -97,7 +107,7 @@ export function TripScreen({ onBack, onHistory }) {
             <div className="flex flex-col items-center gap-2 rounded-3xl p-6 text-center" style={{ backgroundColor: "rgba(61,220,132,0.1)", border: `1px solid ${BORDER}` }}>
               <Check size={22} style={{ color: GREEN }} />
               <p className="text-sm font-semibold" style={{ color: TEXT }}>You've arrived at {trip.destination}</p>
-              <p className="text-xs" style={{ color: SUB }}>{fmtDist(trip.coveredKm, unit)} in {mins}m {secs}s</p>
+              <p className="text-xs" style={{ color: SUB }}>{fmtDist(trip.coveredKm, unit)} in {mins}m {secs}s · driving score <b style={{ color: scoreColor(tripScore(trip).score) }}>{tripScore(trip).score}</b></p>
               <PrimaryButton onClick={() => { dismissTrip(); setDestination(""); }} className="mt-2 px-6">Done</PrimaryButton>
             </div>
           ) : (
@@ -130,6 +140,9 @@ export function TripScreen({ onBack, onHistory }) {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between"><p className="text-sm font-medium" style={{ color: TEXT }}>{a.title}</p><p style={{ fontSize: 10, color: SUB }}>{Math.floor(a.at / 60)}:{String(a.at % 60).padStart(2, "0")}</p></div>
                         <p className="mt-0.5 text-xs leading-relaxed" style={{ color: SUB }}>{a.detail}</p>
+                        {a.roadId && !a.voted && <div className="mt-1.5 flex gap-3 text-[11px] font-medium" style={{ color: SUB }}>
+                          {[[true, "Still there", ThumbsUp], [false, "Gone", ThumbsDown]].map(([still, l, I]) => <button key={l} onClick={() => { voteRoadAlert(a.roadId, still).catch(() => {}); setTrip((t) => ({ ...t, alerts: t.alerts.map((x) => (x.id === a.id ? { ...x, voted: true } : x)) })); }} className="flex items-center gap-1"><I size={12} /> {l}</button>)}
+                        </div>}
                       </div>
                     </div>
                   ); })}
@@ -146,13 +159,35 @@ export function TripScreen({ onBack, onHistory }) {
 
 export function TripHistoryScreen({ onBack }) {
   const { CARD, CARD_ALT, TEXT, SUB, BORDER } = useTheme();
-  const { trips, setTrips, uid, unit, confirm, showToast } = useUI();
+  const { trips, setTrips, uid, unit, confirm, showToast, vehicles } = useUI();
+  const [only, setOnly] = useState("all");
+  const shown = trips.filter((t) => only === "all" || t.purpose === only);
+  const setPurpose = async (t, purpose) => {
+    setTrips((list) => list.map((x) => (x.id === t.id ? { ...x, purpose } : x)));
+    try { await updateTrip(t.id, { purpose }); } catch (e) { setTrips((list) => list.map((x) => (x.id === t.id ? t : x))); showToast(/purpose/.test(e.message) ? "Work trips need one more setup step in the database." : e.message); }
+  };
+  const exportLog = () => {
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const car = (id) => { const v = vehicles.find((x) => x.id === id); return v ? [v.year, v.make, v.model].filter(Boolean).join(" ") : ""; };
+    const rows = shown.map((t) => [new Date(t.ended_at).toISOString().slice(0, 10), new Date(new Date(t.ended_at).getTime() - t.duration_sec * 1000).toTimeString().slice(0, 5), t.origin, t.destination, kmIn(Number(t.distance_km), unit).toFixed(1), distUnit(unit), t.purpose || "personal", car(t.vehicle_id), t.note || ""]);
+    const csv = ["Date,Start time,From,To,Distance,Unit,Purpose,Car,Note", ...rows.map((r) => r.map(esc).join(","))].join("\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" })); a.download = `motiq-mileage-${only}.csv`; document.body.appendChild(a); a.click(); a.remove();
+    showToast("Mileage log downloaded");
+  };
+  const workKm = trips.filter((t) => t.purpose === "work").reduce((s, t) => s + Number(t.distance_km || 0), 0);
   const fmt = (sec) => { const m = Math.floor(sec / 60), s = sec % 60; return m > 0 ? `${m}m ${s}s` : `${s}s`; };
   const when = (ts) => { const d = new Date(ts); return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`; };
   return (
     <div className="flex flex-col gap-4 px-5 pt-2" style={{ paddingBottom: 120 }}>
       <ScreenHeader title="Trip history" sub={`${trips.length} past ${trips.length === 1 ? "trip" : "trips"}`} onBack={onBack}
         right={trips.length > 0 && <RoundButton icon={Trash2} color={RED} label="Clear trip history" onClick={() => confirm("Clear trip history?", "All your saved trips will be deleted. This can't be undone.", "Clear", async () => { try { await clearTrips(uid); setTrips([]); } catch (e) { showToast(e.message); } })} />} />
+      {trips.length > 0 && (
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex gap-2">{[["all", "All"], ["work", "Work"], ["personal", "Personal"]].map(([k, l]) => <button key={k} onClick={() => setOnly(k)} aria-pressed={only === k} className="rounded-full px-3 py-1.5 text-xs font-medium" style={{ backgroundColor: only === k ? TEXT : CARD_ALT, color: only === k ? CARD : SUB }}>{l}</button>)}</div>
+          <button onClick={exportLog} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: TEXT }} aria-label="Export mileage log"><Download size={13} /> Mileage log</button>
+        </div>
+      )}
+      {workKm > 0 && <p className="-mt-2 text-xs" style={{ color: SUB }}>{fmtDist(workKm, unit)} of work driving recorded</p>}
       {trips.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-3xl py-14 text-center" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
           <Navigation size={20} style={{ color: SUB }} /><p className="text-sm font-medium" style={{ color: TEXT }}>No trips yet</p>
@@ -160,7 +195,7 @@ export function TripHistoryScreen({ onBack }) {
         </div>
       ) : (
         <div className="flex flex-col gap-2.5">
-          {trips.map((t) => (
+          {shown.map((t) => (
             <div key={t.id} className="flex flex-col gap-2 rounded-2xl p-4" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium" style={{ color: TEXT }}>{t.origin} → {t.destination}</p><p className="mt-0.5 text-xs" style={{ color: SUB }}>{when(t.ended_at)}</p></div>
@@ -171,7 +206,9 @@ export function TripHistoryScreen({ onBack }) {
                 <span className="flex items-center gap-1"><Timer size={11} />{fmt(t.duration_sec)}</span>
                 {t.alerts > 0 && <span className="flex items-center gap-1"><AlertTriangle size={11} />{t.alerts} alert{t.alerts === 1 ? "" : "s"}</span>}
                 <span>{t.real_route ? "Real route" : "Estimated"}</span>
+                {t.score != null && <span className="font-semibold" style={{ color: scoreColor(t.score) }}>Score {t.score}</span>}
               </div>
+              <div className="flex gap-2">{[["personal", "Personal"], ["work", "Work"]].map(([k, l]) => <button key={k} onClick={() => setPurpose(t, k)} aria-pressed={(t.purpose || "personal") === k} aria-label={`${l} trip`} className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium" style={{ backgroundColor: (t.purpose || "personal") === k ? CARD_ALT : "transparent", color: (t.purpose || "personal") === k ? TEXT : SUB, border: `1px solid ${BORDER}` }}>{k === "work" && <Briefcase size={11} />}{l}</button>)}</div>
             </div>
           ))}
         </div>

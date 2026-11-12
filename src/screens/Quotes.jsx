@@ -5,6 +5,8 @@ import { Wrench, Loader2, Check, MessageCircle, Send, ClipboardList, X } from "l
 import { useTheme, useUI, GREEN, AMBER, Field, Pill, PrimaryButton, SecondaryButton, Empty, Skeleton, carFull, timeAgo } from "../design.jsx";
 import { loadMyQuoteRequests, loadOpenJobs, requestQuote, closeQuoteRequest, sendOffer, acceptOffer, myServiceListing, contactSeller } from "../lib/data.js";
 import { money } from "../lib/units.js";
+import { FairPriceSheet } from "./Daily.jsx";
+import { Scale } from "lucide-react";
 
 export function QuoteRequestForm({ onDone }) {
   const { me, uid, vehicle, showToast } = useUI();
@@ -103,6 +105,7 @@ export default function QuotesView({ onChat }) {
                   </div>
                   <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: CARD_ALT, color: r.status === "open" ? AMBER : r.status === "accepted" ? GREEN : SUB }}>{r.status === "open" ? "Open" : r.status === "accepted" ? "Accepted" : "Closed"}</span>
                 </div>
+                {(r.offers || []).length > 0 && <button onClick={() => openSheet("Is this price fair?", <FairPriceSheet initial={r.description} />)} className="flex items-center gap-1 self-start text-[11px] font-medium" style={{ color: SUB }}><Scale size={12} /> Is this price fair?</button>}
                 {(r.offers || []).length === 0 ? <p className="text-xs" style={{ color: SUB }}>{r.status === "open" ? "Waiting for quotes…" : "No quotes."}</p> : [...r.offers].sort((a, b) => (a.price ?? 1e12) - (b.price ?? 1e12)).map((o) => (
                   <div key={o.id} className="rounded-2xl p-3" style={{ backgroundColor: CARD_ALT }}>
                     <div className="flex items-center justify-between gap-2">

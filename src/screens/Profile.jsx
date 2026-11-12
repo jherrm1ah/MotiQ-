@@ -6,6 +6,22 @@ import { t } from "../lib/i18n.js";
 import { useTheme, useUI, RED, AMBER, GREEN, ACCENT, Field, Pill, PrimaryButton, SecondaryButton, ToggleRow, Stat, TrackThumb, Logo, carLabel } from "../design.jsx";
 import { saveProfile, clearAiHistory, addDocument, deleteDocument, unblockUser } from "../lib/data.js";
 import { LanguagePicker, ExpensesSheet, ProCard } from "./ProfileExtras.jsx";
+import { WeeklySheet, InviteSheet, EarningsSheet } from "./Daily.jsx";
+import { CalendarDays, Briefcase, Gift } from "lucide-react";
+
+// Ride-hailing driver mode: shows today's profit on Home and tracks earnings against costs.
+function DriverModeSheet() {
+  const { me, setMe, showToast } = useUI();
+  const { SUB } = useTheme();
+  const toggle = async (v) => { try { setMe(await saveProfile(me.id, { driver_mode: v })); } catch (e) { showToast(/driver_mode/.test(e.message) ? "Driver mode needs one more setup step in the database." : e.message); } };
+  return (
+    <div className="flex flex-col gap-4">
+      <ToggleRow label="I drive for Uber, Bolt, inDrive or a taxi" on={!!me.driver_mode} onChange={toggle} />
+      <p className="text-xs leading-relaxed" style={{ color: SUB }}>Home then shows today's profit: what you earned minus fuel and repairs logged in Motiq.</p>
+      {me.driver_mode && <EarningsSheet />}
+    </div>
+  );
+}
 import { canNotify, askNotificationPermission, syncReminders } from "../lib/notify.js";
 import { COUNTRIES, CURRENCIES, defaultsFor, guessCountry, countryName, daysUntil, dateLabel } from "../lib/units.js";
 
@@ -173,6 +189,9 @@ function AlertsPicker() {
       {row("Documents about to expire", "alertsDocuments")}
       {row("Trip alerts", "alertsTrips")}
       <ToggleRow label="Start trips automatically when I drive (while Motiq is open)" on={!!prefs.autoTrips} onChange={(v) => setPrefs({ ...prefs, autoTrips: v })} />
+      <ToggleRow label="Morning car check on my phone" on={!!prefs.morningCheck} onChange={(v) => setPrefs({ ...prefs, morningCheck: v })} />
+      {prefs.morningCheck && <Field label="Time" type="time" value={prefs.morningTime || "07:30"} onChange={(e) => setPrefs({ ...prefs, morningTime: e.target.value })} />}
+      {row("Weekly summary on Sundays", "weeklySummary")}
       <p className="text-xs leading-relaxed" style={{ color: SUB }}>These show in the bell on Home.{canNotify() ? " In the app, Motiq also reminds you on your phone: 3 days before a service is due and 2 weeks before a document expires." : " Phone reminders work in the Motiq Android app."}</p>
       {canNotify() && <PrimaryButton onClick={async () => { const ok = await askNotificationPermission(); if (ok) { await syncReminders({ vehicles: garage.cars, reminders: garage.reminders, documents, prefs }); showToast("Phone reminders are on"); } else showToast("Allow notifications for Motiq in your phone's settings"); }}><Bell size={15} /> Turn on phone reminders</PrimaryButton>}
     </div>
@@ -245,6 +264,9 @@ export default function Profile() {
     ["Notifications", Bell, () => <AlertsPicker />],
     ["Language", Globe, () => <LanguagePicker />],
     ["Costs & expenses", Wallet, () => <ExpensesSheet />],
+    ["Your week", CalendarDays, () => <WeeklySheet />],
+    ["Driver earnings (Uber, Bolt…)", Briefcase, () => <DriverModeSheet />],
+    ["Invite friends", Gift, () => <InviteSheet />],
     ["Music & media", Music2, () => <MusicInfo />],
     ["Documents & warranty", FileText, () => <DocumentsSheet />],
     ["Privacy & security", Shield, () => <PrivacySheet />],

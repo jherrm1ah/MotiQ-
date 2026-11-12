@@ -34,6 +34,9 @@ async function fakes(p, db, calls) {
       Object.assign(db.profiles[0], { plan: "pro", pro_until: new Date(Date.now() + 365 * 86400000).toISOString() });
       return json(route, { url: "http://localhost:4322/?pro=done", reference: "mq_test", amount: 25000, currency: "NGN" });
     }
+    if (path.endsWith("/rest/v1/rpc/my_referral_code")) return json(route, "K7M2QX");
+    if (path.endsWith("/rest/v1/rpc/vote_road_alert")) return json(route, null);
+    if (path.endsWith("/rest/v1/rpc/job_price_stats")) { calls.push("price-stats " + req.postData()); return json(route, { count: 5, low: 30000, median: 40000, high: 50000 }); }
     if (path.endsWith("/rest/v1/rpc/admin_stats")) return json(route, { users: 1234, new_users_7d: 56, pro: 7, cars: 1500, scans_7d: 89, ai_today: 40, listings_active: 300, listings_hidden: 2, reports_7d: db.listing_reports.length, quotes_open: db.quote_requests.length, errors_24h: 0 });
     if (path.endsWith("/rest/v1/rpc/redeem_vehicle_invite")) {
       const v = { id: uuid(), owner_id: SELLER, make: "Honda", model: "Civic", year: 2017, nickname: "Mum's Civic", odometer: 64000, fuel: "petrol", transmission: "automatic", health: 100, created_at: now() };
@@ -56,7 +59,14 @@ async function fakes(p, db, calls) {
     if (m === "DELETE") { db[table] = db[table].filter((r) => !match(r)); return json(route, []); }
     return json(route, []);
   });
-  await p.route(/overpass/, (route) => { calls.push("overpass"); return json(route, { elements: [
+  await p.route(/api\.open-meteo\.com/, (route) => { calls.push("weather"); return json(route, { current: { temperature_2m: 27.4, weather_code: 61 }, daily: { precipitation_probability_max: [80], temperature_2m_max: [30], temperature_2m_min: [24] } }); });
+  await p.route(/overpass/, (route) => {
+    const q = decodeURIComponent(route.request().postData() || "");
+    if (/fuel/.test(q) && !/car_repair/.test(q)) return json(route, { elements: [
+      { type: "node", id: 91, lat: 6.5270, lon: 3.3810, tags: { amenity: "fuel", name: "Total Allen" } },
+      { type: "node", id: 92, lat: 6.5310, lon: 3.3740, tags: { amenity: "fuel", name: "Mobil Ikeja" } },
+    ] });
+    calls.push("overpass"); return json(route, { elements: [
     { type: "node", id: 1, lat: 6.5262, lon: 3.3801, tags: { shop: "car_repair", name: "Lagos Auto Repair", phone: "+234 801 234 5678", opening_hours: "24/7", "addr:street": "Allen Avenue" } },
     { type: "node", id: 2, lat: 6.5301, lon: 3.3712, tags: { shop: "tyres", name: "Ikeja Tyres", opening_hours: "Mo-Sa 08:00-18:00" } },
     { type: "way", id: 3, center: { lat: 6.5198, lon: 3.3851 }, tags: { amenity: "car_wash", name: "Shine Car Wash" } },
@@ -78,7 +88,7 @@ async function fakes(p, db, calls) {
   const errs = [];
   const db = {
     profiles: [{ id: ME, name: "Ada Obi", country: "", currency: "USD", distance_unit: "km", city: "", phone: "", plan: "free", is_admin: true, language: "en", created_at: "2026-03-02T10:00:00Z" }],
-    vehicles: [], service_records: [], reminders: [], scans: [], ai_messages: [], conversations: [], messages: [], vehicle_documents: [], trips: [], fuel_logs: [], listing_reports: [], user_blocks: [], vehicle_invites: [], vehicle_members: [], quote_requests: [], quote_offers: [], client_errors: [], payments: [],
+    vehicles: [], service_records: [], reminders: [], scans: [], ai_messages: [], conversations: [], messages: [], vehicle_documents: [], trips: [], fuel_logs: [], listing_reports: [], user_blocks: [], vehicle_invites: [], vehicle_members: [], fuel_prices: [], road_alerts: [], driver_earnings: [], referrals: [], quote_requests: [], quote_offers: [], client_errors: [], payments: [],
     listings: [{ id: uuid(), seller_id: SELLER, kind: "part", category: "Brakes", title: "Corolla front brake pads", description: "Brand new, still boxed.", price: 25000, currency: "NGN", condition: "new", country: "NG", city: "Lagos", fits_make: "Toyota", fits_model: "Corolla", fits_year_from: 2014, fits_year_to: 2018, photos: [], status: "active", created_at: now(), seller: { id: SELLER, name: "Tunde", city: "Lagos", country: "NG" } }],
   };
   const calls = [];
@@ -322,6 +332,88 @@ async function fakes(p, db, calls) {
   await p.getByRole("button", { name: /Mum's Civic/ }).first().click(); await wait(500);
   t = await body();
   out.joinedCar = db.vehicles.length === 2 && t.includes("mum's civic") && t.includes("shared") && t.includes("leave this shared car");
+
+  // 14) Everyday tools.
+  await nav("Home"); await wait(600);
+  await p.getByRole("button", { name: "Show today's weather" }).click(); await wait(1200);
+  t = await body();
+  out.todayWeather = calls.includes("weather") && t.includes("rain likely") && t.includes("80% rain") && t.includes("today's check");
+  // Fuel prices: report one, then see the cheapest and the saving.
+  db.fuel_prices.push({ id: "fp-1", reporter_id: SELLER, station_key: "92", station_name: "Mobil Ikeja", lat: 6.531, lon: 3.374, country: "NG", fuel: "petrol", price: 950, currency: "NGN", created_at: now() });
+  await p.getByRole("button", { name: "Fuel prices", exact: true }).click(); await wait(1200);
+  await dialog().getByRole("button", { name: /Total Allen/ }).click(); await wait(200);
+  await dialog().getByLabel("Price per litre (NGN)").fill("990");
+  await dialog().getByRole("button", { name: "Share" }).click(); await wait(800);
+  t = (await dialog().innerText()).toLowerCase();
+  out.fuelReported = db.fuel_prices.length === 2 && db.fuel_prices[1].price === 990 && db.fuel_prices[1].station_name === "Total Allen";
+  out.fuelCheapest = t.includes("mobil ikeja") && t.includes("₦950") && t.includes("saves you about");
+  await shot("fuel-prices");
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  // Road alert.
+  await p.getByRole("button", { name: "Road alerts", exact: true }).click(); await wait(900);
+  await dialog().getByRole("button", { name: "Report a road problem" }).click(); await wait(300);
+  await dialog().getByRole("button", { name: "Pothole" }).click();
+  await dialog().getByLabel("Note (optional)").fill("big one after the bridge");
+  await dialog().getByRole("button", { name: "Report", exact: true }).click(); await wait(800);
+  out.roadAlert = db.road_alerts.length === 1 && db.road_alerts[0].kind === "pothole" && Math.abs(db.road_alerts[0].lat - HERE.latitude) < 0.01;
+  // Parking.
+  await p.getByRole("button", { name: "My parking", exact: true }).click(); await wait(300);
+  out.parkingAuto = (await dialog().innerText()).includes("Walk me to my car"); // saved when the earlier trip ended
+  await dialog().getByRole("button", { name: /Update to here/ }).click(); await wait(800);
+  await dialog().getByRole("button", { name: "1 hour" }).click(); await wait(300);
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  t = await body();
+  out.parking = t.includes("parked just now") && t.includes("meter ends");
+  // Fair price.
+  await p.getByRole("button", { name: "Fair price?", exact: true }).click(); await wait(300);
+  await dialog().getByLabel("What's the job?").fill("replace front brake pads");
+  await dialog().getByLabel("Price you were quoted (NGN, optional)").fill("45000");
+  await dialog().getByRole("button", { name: "Check the price" }).click(); await wait(700);
+  t = (await dialog().innerText()).toLowerCase();
+  out.fairPrice = t.includes("fair price") && t.includes("₦30,000") && t.includes("₦50,000") && calls.some((c) => c.includes("brake"));
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  // SOS with an emergency contact.
+  await p.getByRole("button", { name: "SOS emergency" }).first().click(); await wait(900);
+  t = (await dialog().innerText()).toLowerCase();
+  out.sos = t.includes("call emergency (112)") && (await dialog().getByRole("link", { name: /Call emergency/ }).getAttribute("href")) === "tel:112";
+  await dialog().getByRole("button", { name: "Add a contact" }).click();
+  await dialog().getByLabel("Name").fill("Mum"); await dialog().getByLabel("Phone").fill("+234 803 000 0000");
+  await dialog().getByRole("button", { name: "Save contact" }).click(); await wait(700);
+  out.sosContact = Array.isArray(db.profiles[0].sos_contacts) && db.profiles[0].sos_contacts[0].name === "Mum" && (await dialog().innerText()).includes("Text my location to Mum");
+  await shot("sos");
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  // Driving score, work trips and the mileage log (a scored trip from earlier this week).
+  db.trips.push({ id: "trip-1", owner_id: ME, vehicle_id: db.vehicles[0].id, origin: "Home", destination: "Office", distance_km: 18.2, duration_sec: 1900, alerts: 1, real_route: true, completed: true, score: 88, hard_brakes: 1, speeding_sec: 0, night: false, purpose: "personal", ended_at: new Date(Date.now() - 3600000).toISOString() });
+  await nav("Profile"); await wait(300);
+  await p.getByRole("button", { name: /Driver earnings/ }).click(); await wait(300);
+  await dialog().getByRole("switch").or(dialog().getByRole("checkbox")).first().click(); await wait(700);
+  await dialog().getByLabel("Earned (NGN)").fill("20000"); await dialog().getByLabel("Rides").fill("9");
+  await dialog().getByRole("button", { name: "Add earnings" }).click(); await wait(700);
+  out.earnings = db.profiles[0].driver_mode === true && db.driver_earnings.length === 1 && Number(db.driver_earnings[0].amount) === 20000;
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  await p.getByRole("button", { name: "Invite friends" }).click(); await wait(700);
+  out.invite = (await dialog().getByLabel("Your invite code").innerText()).trim() === "K7M2QX";
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  await p.reload(); await wait(1800);
+  t = await body();
+  out.driverToday = t.includes("today's profit") && t.includes("₦20,000");
+  out.scoreCard = t.includes("driving score") && t.includes("88");
+  await shot("home-daily");
+  await p.getByRole("button", { name: /Start a trip|Open live trip/ }).first().click(); await wait(500);
+  await p.getByRole("button", { name: "Trip history" }).click(); await wait(500);
+  await p.getByRole("button", { name: "Work trip" }).first().click(); await wait(600);
+  out.workTrip = db.trips.find((x) => x.id === "trip-1").purpose === "work" && (await body()).includes("score 88");
+  const mileage = p.waitForEvent("download", { timeout: 6000 }).catch(() => null);
+  await p.getByRole("button", { name: "Export mileage log" }).click();
+  const mileageFile = await mileage;
+  out.mileageLog = !!mileageFile && /motiq-mileage-all\.csv$/.test(mileageFile.suggestedFilename());
+  await p.getByRole("button", { name: "Back" }).click(); await wait(300);
+  await nav("Profile"); await wait(400);
+  await p.getByRole("button", { name: "Your week" }).click(); await wait(400);
+  t = (await dialog().innerText()).toLowerCase();
+  out.weekly = t.includes("distance") && t.includes("driving score");
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  await nav("Garage"); await wait(400);
 
   // 13) No signal: the saved garage stays, with a banner.
   await ctx.setOffline(true); await wait(400);

@@ -1,6 +1,10 @@
 // Car Mode Radio: free Creative Commons music (Jamendo) that keeps playing across the app, and
 // Car Mode — a big, simple screen for the road with the music controls and Motiq's hands-free
 // voice co-pilot (tap the mic, ask out loud, hear the answer).
+import { reportRoadAlert } from "../lib/data.js";
+import { currentPosition } from "../lib/geo.js";
+import { emergencyNumber } from "../lib/daily.js";
+import { AlertTriangle } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ListMusic, Search, Heart, Plus, Play, Pause, SkipBack, SkipForward, X, Mic, Square, Volume2, VolumeX, Loader2, Music2 } from "lucide-react";
 import { useTheme, useUI, RED, ACCENT, Skeleton, ScreenHeader, RoundButton, Pill, TrackThumb, carLabel } from "../design.jsx";
@@ -136,7 +140,15 @@ function greeting(me, vehicle) {
 
 // Car Mode: the music player and the voice co-pilot on one big, glanceable screen.
 export function CarMode() {
-  const { me, vehicle, current, isPlaying, togglePlay, playAdjacent, setCarMode, duck, goTo } = useUI();
+  const { me, uid, vehicle, current, isPlaying, togglePlay, playAdjacent, setCarMode, duck, goTo, trip, showToast } = useUI();
+  // One tap, eyes on the road: mark a hazard where you are now.
+  const reportHazard = async () => {
+    try {
+      const p = trip && trip.pos ? trip.pos : await currentPosition();
+      await reportRoadAlert(uid, { kind: "hazard", lat: p.lat, lon: p.lon, note: "" });
+      say("Thanks. Drivers near you will be warned.");
+    } catch (e) { showToast(e.message); }
+  };
   const { FILL, FILL_TEXT, mode } = useTheme();
   const [state, setState] = useState("idle"); // idle | listening | thinking | speaking
   const [heard, setHeard] = useState("");
@@ -203,6 +215,8 @@ export function CarMode() {
           <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: ink, opacity: 0.6 }}>Car Mode</p>
           <p className="truncate text-base font-bold" style={{ color: ink }}>{vehicle ? carLabel(vehicle) : "Motiq"}</p>
         </div>
+        <button onClick={reportHazard} aria-label="Report a road hazard here" className="rounded-full p-2.5 active:scale-95 transition-transform" style={{ backgroundColor: dim }}><AlertTriangle size={20} style={{ color: "#F5B944" }} /></button>
+        <a href={`tel:${emergencyNumber(me.country)}`} aria-label="Call emergency" className="rounded-full px-3 py-2.5 text-xs font-bold" style={{ backgroundColor: "#FF5A5F", color: "#fff" }}>SOS</a>
         <button onClick={() => setVoiceOn((v) => { if (v) stopSpeaking(); return !v; })} aria-label={voiceOn ? "Mute Motiq's voice" : "Turn Motiq's voice on"} className="rounded-full p-2.5 active:scale-95 transition-transform" style={{ backgroundColor: dim }}>
           {voiceOn ? <Volume2 size={20} style={{ color: ink }} /> : <VolumeX size={20} style={{ color: ink }} />}
         </button>
