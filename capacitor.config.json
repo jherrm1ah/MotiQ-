@@ -3,7 +3,13 @@
   "appName": "Motiq",
   "webDir": "dist",
   "android": {
-    "backgroundColor": "#0B0E13",
+    "backgroundColor": "#212121",
     "allowMixedContent": false
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_motiq",
+      "iconColor": "#212121"
+    }
   }
 }

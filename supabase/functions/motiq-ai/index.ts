@@ -6,6 +6,7 @@
 //     -> { reply }
 //   mode "voice": Car Mode. Short, spoken-style answers (no lists or symbols).
 //   mode "scan":  explain an OBD-II scan in plain words (message holds the codes and readings).
+//   mode "vin":   read the VIN from a photo (imagePath); replies with just the VIN. Not saved.
 //
 // Secret: ANTHROPIC_API_KEY (Supabase → Project Settings → Edge Functions → Secrets).
 import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
@@ -66,7 +67,7 @@ Deno.serve(async (req) => {
     if (!u?.user) return json({ error: "Sign in first" }, 401);
     const uid = u.user.id;
     const body = await req.json().catch(() => ({}));
-    const mode = body.mode === "voice" || body.mode === "scan" ? body.mode : "chat";
+    const mode = ["voice", "scan", "vin"].includes(body.mode) ? body.mode : "chat";
     const message = String(body.message || "").trim().slice(0, 4000);
     if (!message) throw new UserError("Ask something about your car.");
     if (!Deno.env.get("ANTHROPIC_API_KEY")) throw new UserError("The AI mechanic isn't switched on yet. The Motiq team needs to add its key.");
@@ -111,6 +112,16 @@ Deno.serve(async (req) => {
     content.push({ type: "text", text: message });
 
     const client = new Anthropic();
+    if (mode === "vin") {
+      if (!imagePath) throw new UserError("Add a photo of the VIN plate or sticker.");
+      const r = await client.beta.messages.create({
+        model: MODEL, max_tokens: 200, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default", output_config: { effort: "low" },
+        system: "Find the vehicle identification number (VIN) in the photo: 17 characters, letters and digits, never I, O or Q. Reply with only the VIN, or NONE if you can't read all 17 characters with confidence.",
+        messages: [{ role: "user", content }],
+      });
+      const text = r.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
+      return json({ reply: text });
+    }
     const response = await client.beta.messages.create({
       model: MODEL,
       max_tokens: mode === "voice" ? 1000 : 4000,

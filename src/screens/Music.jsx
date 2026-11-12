@@ -3,7 +3,7 @@
 // voice co-pilot (tap the mic, ask out loud, hear the answer).
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ListMusic, Search, Heart, Plus, Play, Pause, SkipBack, SkipForward, X, Mic, Square, Volume2, VolumeX, Loader2, Music2 } from "lucide-react";
-import { useTheme, useUI, RED, ScreenHeader, RoundButton, Pill, TrackThumb, carLabel } from "../design.jsx";
+import { useTheme, useUI, RED, ACCENT, Skeleton, ScreenHeader, RoundButton, Pill, TrackThumb, carLabel } from "../design.jsx";
 import { fetchTracks, MUSIC_GENRES } from "../lib/music.js";
 import { askMotiq } from "../lib/data.js";
 import { listen, stopListening, speak, stopSpeaking, canListen, canSpeak } from "../lib/voice.js";
@@ -53,7 +53,7 @@ export default function MusicScreen({ onBack }) {
         {MUSIC_GENRES.map((g) => <Pill key={g} active={genre === g && !query} onClick={() => { setGenre(g); setQuery(""); }}>{g}</Pill>)}
       </div>
 
-      {loading ? <div className="flex justify-center py-14"><Loader2 size={18} className="animate-spin" style={{ color: SUB }} /></div>
+      {loading ? <Skeleton rows={5} height={60} radius={18} />
         : error ? <div className="rounded-3xl py-14 text-center text-sm" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}`, color: SUB }}>{error}</div>
           : tracks.length === 0 ? <div className="py-14 text-center text-sm" style={{ color: SUB }}>No tracks found.</div>
             : (
@@ -137,7 +137,7 @@ function greeting(me, vehicle) {
 // Car Mode: the music player and the voice co-pilot on one big, glanceable screen.
 export function CarMode() {
   const { me, vehicle, current, isPlaying, togglePlay, playAdjacent, setCarMode, duck, goTo } = useUI();
-  const { FILL, FILL_TEXT } = useTheme();
+  const { FILL, FILL_TEXT, mode } = useTheme();
   const [state, setState] = useState("idle"); // idle | listening | thinking | speaking
   const [heard, setHeard] = useState("");
   const [answer, setAnswer] = useState("");
@@ -186,12 +186,17 @@ export function CarMode() {
     } catch (e) { duck(false); setState("idle"); setAnswer(e.message); }
   };
 
-  const ink = FILL_TEXT;
-  const dim = "rgba(128,128,128,0.2)";
-  const mic = state === "listening" ? { bg: RED, label: "Listening… tap to stop", Icon: Square } : state === "thinking" ? { bg: dim, label: "Thinking…", Icon: Loader2 } : state === "speaking" ? { bg: ink, label: "Tap to interrupt and ask", Icon: Mic } : { bg: ink, label: "Tap and ask Motiq", Icon: Mic };
+  // Dark whenever the app is dark or it's night (7pm–6am), so it never lights up the car at night.
+  const hour = new Date().getHours();
+  const night = mode === "dark" || hour >= 19 || hour < 6;
+  const bg = night ? "#0A0A0A" : FILL;
+  const ink = night ? "#FFFFFF" : FILL_TEXT;
+  const dim = night ? "rgba(255,255,255,0.1)" : "rgba(128,128,128,0.2)";
+  const micBg = night ? ACCENT : ink, micInk = night ? "#000" : FILL;
+  const mic = state === "listening" ? { bg: RED, fg: "#fff", label: "Listening… tap to stop", Icon: Square } : state === "thinking" ? { bg: dim, fg: ink, label: "Thinking…", Icon: Loader2 } : state === "speaking" ? { bg: micBg, fg: micInk, label: "Tap to interrupt and ask", Icon: Mic } : { bg: micBg, fg: micInk, label: "Tap and ask Motiq", Icon: Mic };
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col px-6" role="dialog" aria-label="Car Mode" style={{ backgroundColor: FILL, paddingTop: "calc(20px + env(safe-area-inset-top, 0px))", paddingBottom: "calc(24px + env(safe-area-inset-bottom, 0px))" }}>
+    <div className="absolute inset-0 z-50 flex flex-col px-6" role="dialog" aria-label="Car Mode" style={{ backgroundColor: bg, paddingTop: "calc(20px + env(safe-area-inset-top, 0px))", paddingBottom: "calc(24px + env(safe-area-inset-bottom, 0px))" }}>
       <div className="flex items-center gap-3">
         <button onClick={() => setCarMode(false)} aria-label="Leave Car Mode" className="rounded-full p-2.5 active:scale-95 transition-transform" style={{ backgroundColor: dim }}><ArrowLeft size={20} style={{ color: ink }} /></button>
         <div className="min-w-0 flex-1">
@@ -226,7 +231,7 @@ export function CarMode() {
         <div className="no-scrollbar -mx-6 flex gap-2 overflow-x-auto px-6">
           {QUICK.map((q) => <button key={q} onClick={() => ask(q)} disabled={state === "thinking"} className="shrink-0 whitespace-nowrap rounded-full px-4 py-2.5 text-sm font-medium disabled:opacity-50" style={{ backgroundColor: dim, color: ink }}>{q}</button>)}
         </div>
-        <button onClick={talk} disabled={state === "thinking"} aria-label={mic.label} className="flex w-full items-center justify-center gap-3 rounded-full py-5 text-base font-bold active:scale-[0.98] transition-transform disabled:opacity-80" style={{ backgroundColor: mic.bg, color: mic.bg === ink ? FILL : ink }}>
+        <button onClick={talk} disabled={state === "thinking"} aria-label={mic.label} className="flex w-full items-center justify-center gap-3 rounded-full py-6 text-lg font-bold active:scale-[0.98] transition-transform disabled:opacity-80" style={{ backgroundColor: mic.bg, color: mic.fg, boxShadow: mic.bg === ACCENT ? "0 0 32px rgba(239,255,0,0.35)" : "none" }}>
           <mic.Icon size={24} className={state === "thinking" ? "animate-spin" : ""} /> {mic.label}
         </button>
       </div>

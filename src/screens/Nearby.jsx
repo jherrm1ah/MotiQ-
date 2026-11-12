@@ -1,14 +1,15 @@
 // Nearby: real places that help with cars (from OpenStreetMap, around where you are) and the
 // Motiq market where people sell parts, services and cars.
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Search, MapPin, Clock, Phone, Globe, ChevronRight, Navigation, LocateFixed, Loader2, Store, Plus, MessageCircle, Send, Package, Wrench, Car as CarIcon, Inbox, X, Camera, ArrowLeft, RefreshCw } from "lucide-react";
+import { Search, MapPin, Clock, Phone, Globe, ChevronRight, Navigation, LocateFixed, Loader2, Store, Plus, MessageCircle, Send, Package, Wrench, Car as CarIcon, Inbox, X, Camera, ArrowLeft, RefreshCw, Flag, Ban } from "lucide-react";
 import { supabase } from "../lib/supabase.js";
-import { useTheme, useUI, RED, AMBER, GREEN, GlowIcon, Pill, Field, PrimaryButton, SecondaryButton, Empty, Card, ScreenHeader, RoundButton, fmtDist } from "../design.jsx";
+import { useTheme, useUI, RED, AMBER, GREEN, GlowIcon, Pill, Field, PrimaryButton, SecondaryButton, Empty, Card, ScreenHeader, RoundButton, Skeleton, fmtDist } from "../design.jsx";
 import { PLACE_CATEGORIES, findPlaces } from "../lib/places.js";
 import { currentPosition, directionsUrl } from "../lib/geo.js";
-import { loadListings, saveListing, setListingStatus, uploadPhoto, listingPhotoUrl, contactSeller, loadInbox, loadMessages, sendMessage, markRead } from "../lib/data.js";
+import { loadListings, saveListing, setListingStatus, uploadPhoto, listingPhotoUrl, contactSeller, loadInbox, loadMessages, sendMessage, markRead, reportListing, blockUser } from "../lib/data.js";
 import { money, countryName, CURRENCIES, dateLabel } from "../lib/units.js";
 import { PLACE_ICONS } from "./Home.jsx";
+import PlaceMap from "./PlaceMap.jsx";
 
 const openExternal = (url) => { const w = window.open(url, "_blank", "noopener"); if (!w) window.location.href = url; };
 
@@ -89,9 +90,10 @@ function Places({ initialFilter }) {
       </div>
 
       {status === "locating" || status === "loading" ? (
-        <div className="flex flex-col items-center gap-2 py-14 text-center" style={{ borderRadius: 24, backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
-          <Loader2 size={18} className="animate-spin" style={{ color: SUB }} />
-          <p className="text-sm" style={{ color: SUB }}>{status === "locating" ? "Finding where you are…" : "Looking for places near you…"}</p>
+        <div className="flex flex-col gap-3">
+          <p role="status" className="text-xs" style={{ color: SUB }}>{status === "locating" ? "Finding where you are…" : "Looking for places near you…"}</p>
+          <div className="skeleton" style={{ height: 250, borderRadius: 22 }} />
+          <Skeleton rows={3} height={84} />
         </div>
       ) : status === "error" ? (
         <div className="flex flex-col items-center gap-3 px-6 py-12 text-center" style={{ borderRadius: 24, backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
@@ -103,7 +105,7 @@ function Places({ initialFilter }) {
         <Empty icon={Search} title={query ? `Nothing matches "${query}"` : `No ${filter === "All" ? "places" : filter.toLowerCase()} found nearby`} text={radius < 30 ? "Try a wider area, or another category." : "OpenStreetMap may not list places here yet."} action={radius < 30 ? "Search a wider area" : null} onAction={() => setRadius(radius < 15 ? 15 : 30)} />
       ) : (
         <>
-          <OverviewMap here={pos} places={shown} onPick={openPlace} />
+          <PlaceMap here={pos} places={shown} colorOf={(p) => (PLACE_ICONS[p.category] || PLACE_ICONS.Mechanics)[1]} onPick={openPlace} />
           <div className="flex flex-col gap-3">
             {shown.slice(0, 60).map((p) => {
               const [icon, glow] = PLACE_ICONS[p.category] || PLACE_ICONS.Mechanics;
@@ -127,34 +129,6 @@ function Places({ initialFilter }) {
         </>
       )}
     </>
-  );
-}
-
-// Places plotted around you, by their real direction and distance.
-function OverviewMap({ here, places, onPick }) {
-  const { CARD_ALT, SUB, TEXT } = useTheme();
-  const shown = places.slice(0, 24);
-  const maxKm = Math.max(0.3, ...shown.map((p) => p.km));
-  const kx = Math.cos((here.lat * Math.PI) / 180);
-  const pt = (p) => {
-    const dx = (p.lon - here.lon) * kx * 111.32, dy = (p.lat - here.lat) * 110.57;
-    return { x: 160 + (dx / maxKm) * 140, y: 80 - (dy / maxKm) * 64 };
-  };
-  return (
-    <div className="overflow-hidden" style={{ borderRadius: 22, backgroundColor: CARD_ALT }}>
-      <svg viewBox="0 0 320 160" className="block w-full" role="img" aria-label={`Map of ${places.length} places around you`}>
-        {Array.from({ length: 5 }).map((_, r) => Array.from({ length: 9 }).map((__, c) => <circle key={`${r}-${c}`} cx={c * 40 + 20} cy={r * 32 + 16} r="1.4" fill={SUB} opacity="0.25" />))}
-        <circle cx="160" cy="80" r="10" fill="none" stroke={TEXT} strokeWidth="1.5" opacity="0.35" />
-        <circle cx="160" cy="80" r="5" fill={TEXT} />
-        {shown.map((p) => { const { x, y } = pt(p); const glow = (PLACE_ICONS[p.category] || PLACE_ICONS.Mechanics)[1]; return (
-          <g key={p.id} onClick={() => onPick(p)} style={{ cursor: "pointer" }}><circle cx={x} cy={y} r="8" fill={glow} opacity="0.9" /><circle cx={x} cy={y} r="2.6" fill="white" /></g>
-        ); })}
-      </svg>
-      <div className="flex items-center justify-between px-4 pb-3.5 pt-1">
-        <span className="text-xs" style={{ color: SUB }}>You are here</span>
-        <span className="text-xs font-semibold" style={{ color: TEXT }}>{places.length} nearby</span>
-      </div>
-    </div>
   );
 }
 
@@ -207,7 +181,7 @@ const CATEGORIES = {
 };
 
 function Market() {
-  const { me, vehicle, openSheet, closeSheet, showToast } = useUI();
+  const { me, vehicle, openSheet, closeSheet, showToast, blocks } = useUI();
   const { CARD, TEXT, SUB, BORDER, FILL, FILL_TEXT } = useTheme();
   const [view, setView] = useState("browse"); // browse | mine | inbox
   const [kind, setKind] = useState("part");
@@ -223,12 +197,12 @@ function Market() {
     let off = false;
     const t = setTimeout(async () => {
       try {
-        if (view === "inbox") { const x = await loadInbox(me.id); if (!off) setInbox(x); }
-        else { const x = await loadListings(view === "mine" ? { mine: true, uid: me.id } : { kind, q, fitsMake: fits && vehicle ? vehicle.make : "" }); if (!off) setList(x); }
+        if (view === "inbox") { const x = await loadInbox(me.id); if (!off) setInbox(x.filter((c) => !blocks.includes(c.buyer_id === me.id ? c.seller_id : c.buyer_id))); }
+        else { const x = await loadListings(view === "mine" ? { mine: true, uid: me.id } : { kind, q, fitsMake: fits && vehicle ? vehicle.make : "" }); if (!off) setList(x.filter((l) => !blocks.includes(l.seller_id))); }
       } catch (e) { if (!off) { showToast(e.message); setList([]); setInbox([]); } }
     }, q ? 300 : 0);
     return () => { off = true; clearTimeout(t); };
-  }, [view, kind, q, fits, version]);
+  }, [view, kind, q, fits, version, blocks]);
   useEffect(() => { loadInbox(me.id).then(setInbox).catch(() => {}); }, []);
   const unread = (inbox || []).reduce((n, c) => n + c.unread, 0);
 
@@ -298,7 +272,7 @@ function Market() {
   );
 }
 
-const Loading = () => <div className="flex justify-center py-10"><Loader2 size={18} className="animate-spin" style={{ color: useTheme().SUB }} /></div>;
+const Loading = () => <Skeleton rows={3} height={96} radius={20} />;
 
 function Thumb({ photos, kind, size }) {
   const { CARD_ALT, SUB } = useTheme();
@@ -311,7 +285,7 @@ function Thumb({ photos, kind, size }) {
 }
 
 function ListingSheet({ l, onContact, onEdit, onChanged }) {
-  const { me, confirm, showToast } = useUI();
+  const { me, confirm, showToast, openSheet, setBlocks } = useUI();
   const { TEXT, SUB, CARD_ALT } = useTheme();
   const mine = l.seller_id === me.id;
   const [i, setI] = useState(0);
@@ -338,8 +312,41 @@ function ListingSheet({ l, onContact, onEdit, onChanged }) {
             : <PrimaryButton onClick={async () => { await setListingStatus(l.id, "active"); showToast("Listed again"); onChanged(); }}>Relist</PrimaryButton>}
           <SecondaryButton color={RED} onClick={() => confirm("Remove this listing?", "People won't see it in the market any more.", "Remove", async () => { await setListingStatus(l.id, "hidden"); onChanged(); })}>Remove</SecondaryButton>
         </div>
-      ) : <PrimaryButton onClick={onContact}><MessageCircle size={16} /> Message the seller</PrimaryButton>}
+      ) : (
+        <>
+          <PrimaryButton onClick={onContact}><MessageCircle size={16} /> Message the seller</PrimaryButton>
+          <div className="flex items-center justify-center gap-5 pt-1">
+            <button onClick={() => openSheet("Report this listing", <ReportForm listing={l} />)} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: SUB }}><Flag size={13} /> Report</button>
+            <button onClick={() => confirm(`Block ${(l.seller && l.seller.name) || "this seller"}?`, "You won't see their listings, and they can't message you. You can unblock them in Profile → Privacy.", "Block", async () => { try { await blockUser(me.id, l.seller_id); setBlocks((b) => [...b, l.seller_id]); showToast("Blocked"); onChanged(); } catch (e) { showToast(e.message); } })} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: RED }}><Ban size={13} /> Block seller</button>
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+const REASONS = [["scam", "Looks like a scam"], ["fake", "Fake or stolen item"], ["wrong_price", "Misleading price or details"], ["offensive", "Offensive"], ["sold", "Already sold"], ["other", "Something else"]];
+function ReportForm({ listing }) {
+  const { me, closeSheet, showToast } = useUI();
+  const { SUB } = useTheme();
+  const [reason, setReason] = useState("");
+  const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
+  const send = async (e) => {
+    e.preventDefault();
+    if (!reason) return showToast("Pick a reason.");
+    setBusy(true);
+    try { await reportListing(me.id, listing.id, reason, details); closeSheet(); showToast("Thanks — we'll take a look"); }
+    catch (err) { showToast(/listing_reports/.test(err.message) ? "Reporting needs one more setup step in the database." : err.message); }
+    setBusy(false);
+  };
+  return (
+    <form onSubmit={send} className="flex flex-col gap-3">
+      <p className="text-xs leading-relaxed" style={{ color: SUB }}>Listings reported by several people are hidden until they're reviewed. The seller isn't told who reported it.</p>
+      <div className="flex flex-wrap gap-2">{REASONS.map(([k, label]) => <Pill key={k} small active={reason === k} onClick={() => setReason(k)}>{label}</Pill>)}</div>
+      <Field label="Anything else? (optional)" as="textarea" rows={3} value={details} onChange={(e) => setDetails(e.target.value)} maxLength={500} />
+      <PrimaryButton type="submit" disabled={busy}>Send report</PrimaryButton>
+    </form>
   );
 }
 

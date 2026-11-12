@@ -321,8 +321,8 @@ export function Sheet({ sheet, onClose }) {
   if (!sheet) return null;
   return (
     <div className="absolute inset-0 z-30 flex items-end" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-      <div className="absolute inset-0" style={{ backgroundColor: "rgba(0,0,0,0.65)" }} />
-      <div className="no-scrollbar relative z-10 w-full overflow-y-auto p-5" style={{ borderTopLeftRadius: 32, borderTopRightRadius: 32, backgroundColor: BG, border: `1px solid ${BORDER}`, maxHeight: "86%", paddingBottom: "calc(28px + env(safe-area-inset-bottom, 0px))" }} onClick={(e) => e.stopPropagation()}>
+      <div className="fade-in absolute inset-0" style={{ backgroundColor: "rgba(0,0,0,0.65)" }} />
+      <div className="sheet-in no-scrollbar relative z-10 w-full overflow-y-auto p-5" style={{ borderTopLeftRadius: 32, borderTopRightRadius: 32, backgroundColor: BG, border: `1px solid ${BORDER}`, maxHeight: "86%", paddingBottom: "calc(28px + env(safe-area-inset-bottom, 0px))" }} onClick={(e) => e.stopPropagation()}>
         <div className="mx-auto mb-4 h-1 w-10 rounded-full" style={{ backgroundColor: BORDER }} />
         <div className="mb-4 flex items-center justify-between gap-3">
           <h3 id="sheet-title" className="text-base font-semibold" style={{ color: TEXT }}>{sheet.title}</h3>
@@ -339,8 +339,28 @@ export function Toast({ message }) {
   if (!message) return null;
   return (
     <div className="pointer-events-none absolute inset-x-0 z-[60] flex justify-center px-8" style={{ bottom: "calc(112px + env(safe-area-inset-bottom, 0px))" }} role="status" aria-live="polite">
-      <div className="rounded-full px-4 py-2.5 text-center text-xs font-semibold shadow-2xl" style={{ backgroundColor: FILL, color: FILL_TEXT }}>{message}</div>
+      <div key={message} className="fade-in rounded-full px-4 py-2.5 text-center text-xs font-semibold shadow-2xl" style={{ backgroundColor: FILL, color: FILL_TEXT }}>{message}</div>
     </div>
+  );
+}
+
+// Placeholder blocks while something loads: `rows` cards of `height` px.
+export function Skeleton({ rows = 3, height = 72, radius = 22 }) {
+  return (
+    <div className="flex flex-col gap-3" aria-busy="true" aria-label="Loading">
+      {Array.from({ length: rows }).map((_, i) => <div key={i} className="skeleton" style={{ height, borderRadius: radius }} />)}
+    </div>
+  );
+}
+
+// The main "do it" button on dark screens: neon with black text; on light screens, the usual black.
+export function NeonButton({ children, onClick, disabled, className = "", type = "button" }) {
+  const { mode, FILL, FILL_TEXT } = useTheme();
+  const neon = mode === "dark";
+  return (
+    <button type={type} onClick={onClick} disabled={disabled} className={`flex items-center justify-center gap-1.5 font-semibold active:scale-95 transition-transform disabled:opacity-40 ${className}`} style={neon ? { backgroundColor: ACCENT, color: "#000", boxShadow: "0 0 24px rgba(239,255,0,0.18)" } : { backgroundColor: FILL, color: FILL_TEXT }}>
+      {children}
+    </button>
   );
 }
 

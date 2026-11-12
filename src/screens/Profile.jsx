@@ -3,7 +3,8 @@
 import React, { useState } from "react";
 import { User, Sun, Moon, Gauge, Bell, Music2, FileText, Shield, HelpCircle, ChevronRight, LogOut, Mail, Plus, Trash2, ShieldCheck, Loader2, Car } from "lucide-react";
 import { useTheme, useUI, RED, AMBER, GREEN, ACCENT, Field, Pill, PrimaryButton, SecondaryButton, ToggleRow, Stat, TrackThumb, Logo, carLabel } from "../design.jsx";
-import { saveProfile, clearAiHistory, addDocument, deleteDocument } from "../lib/data.js";
+import { saveProfile, clearAiHistory, addDocument, deleteDocument, unblockUser } from "../lib/data.js";
+import { canNotify, askNotificationPermission, syncReminders } from "../lib/notify.js";
 import { COUNTRIES, CURRENCIES, defaultsFor, guessCountry, countryName, daysUntil, dateLabel } from "../lib/units.js";
 
 export function ProfileForm({ submitLabel = "Save", onSaved }) {
@@ -160,7 +161,7 @@ function UnitsPicker() {
 }
 
 function AlertsPicker() {
-  const { prefs, setPrefs } = useUI();
+  const { prefs, setPrefs, garage, documents, showToast } = useUI();
   const { SUB } = useTheme();
   const row = (label, key) => <ToggleRow label={label} on={prefs[key] !== false} onChange={(v) => setPrefs({ ...prefs, [key]: v })} />;
   return (
@@ -169,7 +170,8 @@ function AlertsPicker() {
       {row("Fault codes from scans", "alertsScans")}
       {row("Documents about to expire", "alertsDocuments")}
       {row("Trip alerts", "alertsTrips")}
-      <p className="text-xs leading-relaxed" style={{ color: SUB }}>These show in the bell on Home.</p>
+      <p className="text-xs leading-relaxed" style={{ color: SUB }}>These show in the bell on Home.{canNotify() ? " In the app, Motiq also reminds you on your phone: 3 days before a service is due and 2 weeks before a document expires." : " Phone reminders work in the Motiq Android app."}</p>
+      {canNotify() && <PrimaryButton onClick={async () => { const ok = await askNotificationPermission(); if (ok) { await syncReminders({ vehicles: garage.cars, reminders: garage.reminders, documents, prefs }); showToast("Phone reminders are on"); } else showToast("Allow notifications for Motiq in your phone's settings"); }}><Bell size={15} /> Turn on phone reminders</PrimaryButton>}
     </div>
   );
 }
@@ -195,13 +197,19 @@ function MusicInfo() {
 }
 
 function PrivacySheet() {
-  const { uid, confirm, showToast } = useUI();
-  const { SUB } = useTheme();
+  const { uid, confirm, showToast, blocks, setBlocks } = useUI();
+  const { SUB, TEXT, CARD_ALT } = useTheme();
   return (
     <div className="flex flex-col gap-3 text-sm" style={{ color: SUB }}>
       <p className="leading-relaxed">Your cars, service history, scans, documents, trips and AI chats are private to your account. Only your market listings (and your name and city on them) are public.</p>
       <p className="leading-relaxed">Your location is used on this phone to find places near you and track trips. It isn't stored, except the start and end names of trips you save.</p>
       <p className="leading-relaxed">Questions and photos you send to the AI mechanic are processed by Anthropic's Claude to answer you.</p>
+      {blocks.length > 0 && (
+        <div className="flex items-center justify-between gap-3 rounded-2xl p-3.5" style={{ backgroundColor: CARD_ALT }}>
+          <span className="text-sm" style={{ color: TEXT }}>{blocks.length} blocked {blocks.length === 1 ? "person" : "people"}</span>
+          <button onClick={async () => { for (const b of blocks) await unblockUser(uid, b).catch(() => {}); setBlocks([]); showToast("Unblocked everyone"); }} className="text-xs font-semibold" style={{ color: TEXT }}>Unblock all</button>
+        </div>
+      )}
       <SecondaryButton color={RED} onClick={() => confirm("Delete your AI chats?", "Deletes every conversation with the AI mechanic, for all your cars.", "Delete", async () => { await clearAiHistory(uid); showToast("AI chats deleted"); })}>Delete my AI chats</SecondaryButton>
     </div>
   );

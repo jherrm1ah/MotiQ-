@@ -2,7 +2,7 @@
 // history, documents, the OBD-II adapter and editing. The forms here are reused from Home.
 import React, { useState } from "react";
 import {
-  Plus, ChevronDown, ChevronRight, Car, Bluetooth, BluetoothConnected, Trash2, Check, AlertTriangle, Wrench, Bot, Pencil, Gauge, ScanLine, FileText, Loader2,
+  Plus, ChevronDown, ChevronRight, Car, Bluetooth, BluetoothConnected, Trash2, Check, AlertTriangle, Wrench, Bot, Pencil, Gauge, ScanLine, FileText, Loader2, Fuel, ShieldAlert, Share2, Camera, Search,
 } from "lucide-react";
 import {
   useTheme, useUI, RED, AMBER, GREEN, Ring, Field, Pill, PrimaryButton, SecondaryButton, LiveStat, Empty, ScreenHeader,
@@ -12,6 +12,8 @@ import {
   saveCar, deleteCar, updateOdometer, addService, deleteService, addReminder, completeReminder, deleteReminder, reminderState, reminderTemplates,
 } from "../lib/data.js";
 import { money, todayISO, dateLabel } from "../lib/units.js";
+import { decodeVin, readVinFromPhoto } from "../lib/data.js";
+import { FuelSheet, RecallsSheet, shareHistory } from "./CarTools.jsx";
 
 const FUELS = [["petrol", "Petrol"], ["diesel", "Diesel"], ["hybrid", "Hybrid"], ["electric", "Electric"], ["lpg", "Gas (LPG/CNG)"], ["other", "Other"]];
 const GEARS = [["automatic", "Automatic"], ["manual", "Manual"], ["cvt", "CVT"], ["other", "Other"]];
@@ -35,8 +37,32 @@ export function CarForm({ car, onDone }) {
     if (c.year && (c.year < 1950 || c.year > new Date().getFullYear() + 1)) return showToast("Check the year.");
     run(async () => { const row = await saveCar(uid, c); await reload(); showToast(car ? "Saved" : `${carFull(row)} added to your garage`); onDone && onDone(row); });
   };
+  const [vinBusy, setVinBusy] = useState("");
+  const vinFile = React.useRef(null);
+  const fillFromVin = async (vin) => {
+    setVinBusy("Looking up your VIN…");
+    try { const d = await decodeVin(vin); setC((x) => ({ ...x, vin: d.vin, make: d.make || x.make, model: d.model || x.model, year: d.year || x.year, trim_level: d.trim_level || x.trim_level, fuel: d.fuel || x.fuel })); showToast(`Found: ${[d.year, d.make, d.model].filter(Boolean).join(" ")}`); }
+    catch (e) { showToast(e.message); }
+    setVinBusy("");
+  };
+  const scanVin = async (file) => {
+    if (!file) return;
+    setVinBusy("Reading the VIN from your photo…");
+    try { const vin = await readVinFromPhoto(uid, file); setC((x) => ({ ...x, vin })); await fillFromVin(vin); }
+    catch (e) { showToast(e.message); setVinBusy(""); }
+  };
   return (
     <form onSubmit={save} className="flex flex-col gap-3">
+      <div className="rounded-2xl p-3" style={{ backgroundColor: useTheme().CARD_ALT }}>
+        <p className="mb-2 text-xs" style={{ color: useTheme().SUB }}>Fill everything in from the VIN (on the windscreen, door frame or papers):</p>
+        <div className="flex gap-2">
+          <input aria-label="VIN" value={c.vin || ""} onChange={set("vin")} maxLength={17} placeholder="17-character VIN" className="h-11 min-w-0 flex-1 rounded-xl px-3 font-mono text-sm uppercase focus:outline-none" style={{ backgroundColor: useTheme().BG, color: useTheme().TEXT, border: `1px solid ${useTheme().BORDER}` }} />
+          <button type="button" onClick={() => fillFromVin(c.vin)} disabled={!!vinBusy || (c.vin || "").length < 17} aria-label="Look up VIN" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl disabled:opacity-40" style={{ backgroundColor: useTheme().FILL }}><Search size={16} style={{ color: useTheme().FILL_TEXT }} /></button>
+          <button type="button" onClick={() => vinFile.current && vinFile.current.click()} disabled={!!vinBusy} aria-label="Scan VIN with camera" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl disabled:opacity-40" style={{ backgroundColor: useTheme().FILL }}><Camera size={16} style={{ color: useTheme().FILL_TEXT }} /></button>
+          <input ref={vinFile} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; scanVin(f); }} />
+        </div>
+        {vinBusy && <p role="status" className="mt-2 flex items-center gap-1.5 text-xs" style={{ color: useTheme().TEXT }}><Loader2 size={12} className="animate-spin" /> {vinBusy}</p>}
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Make" value={c.make} onChange={set("make")} placeholder="Toyota" autoComplete="off" />
         <Field label="Model" value={c.model} onChange={set("model")} placeholder="Corolla" autoComplete="off" />
@@ -52,10 +78,7 @@ export function CarForm({ car, onDone }) {
         <p className="mb-1.5 text-xs font-medium" style={{ color: useTheme().SUB }}>Gearbox</p>
         <div className="flex flex-wrap gap-2">{GEARS.map(([v, l]) => <Pill key={v} small active={c.transmission === v} onClick={() => setC({ ...c, transmission: v })}>{l}</Pill>)}</div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Plate (optional)" value={c.plate || ""} onChange={set("plate")} />
-        <Field label="VIN (optional)" value={c.vin || ""} onChange={set("vin")} maxLength={17} />
-      </div>
+      <Field label="Plate (optional)" value={c.plate || ""} onChange={set("plate")} />
       <PrimaryButton type="submit" disabled={busy} className="mt-1">{busy && <Loader2 size={15} className="animate-spin" />}{car ? "Save" : "Add car"}</PrimaryButton>
     </form>
   );
@@ -158,7 +181,7 @@ export function OBDConnectSheet({ onScan, onDemo }) {
 }
 
 export default function Garage() {
-  const { me, unit, vehicles, garage, documents, obd, liveData, connectOBD, disconnectOBD, openSheet, closeSheet, confirm, goTo, setCarId, reload, showToast } = useUI();
+  const { me, unit, vehicles, garage, documents, fuel, obd, liveData, connectOBD, disconnectOBD, openSheet, closeSheet, confirm, goTo, setCarId, reload, showToast } = useUI();
   const { CARD, CARD_ALT, TEXT, SUB, BORDER, RING_TRACK, FILL, FILL_TEXT } = useTheme();
   const [expanded, setExpanded] = useState(vehicles.length === 1 ? vehicles[0].id : null);
   const addCar = () => openSheet("Add a vehicle", <CarForm onDone={(c) => { setExpanded(c.id); setCarId(c.id); closeSheet(); }} />);
@@ -232,7 +255,10 @@ export default function Garage() {
                     <SmallButton icon={Gauge} label="Odometer" onClick={() => openSheet("Update odometer", <OdometerForm car={v} onDone={closeSheet} />)} />
                     <SmallButton icon={ScanLine} label="Scan" onClick={() => { setCarId(v.id); goTo("scan"); }} />
                     <SmallButton icon={Bot} label="Ask AI" onClick={() => { setCarId(v.id); goTo("ai"); }} />
+                    <SmallButton icon={Fuel} label="Fuel log" onClick={() => openSheet(`Fuel log — ${carLabel(v)}`, <FuelSheet car={v} />)} />
+                    <SmallButton icon={ShieldAlert} label="Recalls & issues" onClick={() => openSheet(`Recalls & known problems`, <RecallsSheet car={v} />)} />
                   </div>
+                  <SmallButton icon={Share2} label="Share car history (PDF)" onClick={async () => { try { const r = await shareHistory({ car: v, garage, documents, fuel, me, unit }); if (r === "downloaded") showToast("History PDF downloaded"); } catch (e) { showToast(e.message || "Couldn't make the PDF"); } }} />
 
                   {services.length > 0 && (
                     <div className="rounded-2xl p-3" style={{ backgroundColor: CARD_ALT }}>

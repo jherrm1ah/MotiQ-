@@ -3,7 +3,7 @@
 // this car's details, service history and last scan.
 import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ScanLine, Gauge, ShieldAlert, Timer, Droplets, Sparkles, Camera, Plus, Send, Mic, Loader2, Clock, Wrench, AudioLines, Bot, Trash2, ImagePlus } from "lucide-react";
-import { useTheme, useUI, RED, VERDICT_STYLE, VerdictBadge, parseVerdict, ScreenHeader, RoundButton, carLabel, timeAgo, SecondaryButton } from "../design.jsx";
+import { useTheme, useUI, RED, VERDICT_STYLE, VerdictBadge, parseVerdict, ScreenHeader, RoundButton, carLabel, timeAgo, SecondaryButton, Skeleton } from "../design.jsx";
 import { askMotiq, loadAiHistory, clearAiHistory, uploadPhoto } from "../lib/data.js";
 import { canListen, listen, stopListening } from "../lib/voice.js";
 import { describeCode } from "../lib/dtc.js";
@@ -129,7 +129,7 @@ export default function AIScreen() {
 
       <div className="mt-4 flex-1">
         {!loaded ? (
-          <div className="mt-10 flex justify-center"><Loader2 size={18} className="animate-spin" style={{ color: SUB }} /></div>
+          <Skeleton rows={3} height={64} radius={18} />
         ) : messages.length === 0 ? (
           <div className="mt-8 flex flex-col items-center gap-3 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl" style={{ backgroundColor: CARD }}><Sparkles size={20} style={{ color: TEXT }} /></div>

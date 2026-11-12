@@ -6,7 +6,7 @@ import {
   Timer, ShieldAlert, AlertTriangle, ScanLine, CircleDot, FileText, Wrench, Package, Droplets, BatteryCharging, Building2, Fuel, Zap, Plus,
 } from "lucide-react";
 import {
-  useTheme, useUI, ACCENT, RED, AMBER, GREEN, BLUE, PURPLE, CYAN, GlowIcon, Ring, NotifRow, Stat, LiveStat, RowButton, PrimaryButton, SecondaryButton,
+  useTheme, useUI, ACCENT, RED, AMBER, GREEN, BLUE, PURPLE, CYAN, GlowIcon, Ring, NotifRow, Stat, LiveStat, RowButton, PrimaryButton, SecondaryButton, NeonButton,
   carLabel, carFull, healthColor, toneColor, timeAgo, fmtDist, fmtSpeed, fmtTemp, fmtDuration,
 } from "../design.jsx";
 import { reminderState } from "../lib/data.js";
@@ -162,7 +162,7 @@ export default function Home() {
 
         <div className="mt-3 grid grid-cols-2 gap-2">
           <button onClick={openHealth} className="rounded-2xl py-3 text-xs font-semibold active:scale-95 transition-transform" style={{ backgroundColor: CARD_ALT, color: TEXT, border: `1px solid ${BORDER}` }}>Health report</button>
-          <button onClick={() => goTo("scan")} className="flex items-center justify-center gap-1.5 rounded-2xl py-3 text-xs font-semibold active:scale-95 transition-transform" style={{ backgroundColor: FILL, color: FILL_TEXT }}><ScanLine size={13} /> Scan car</button>
+          <NeonButton onClick={() => goTo("scan")} className="rounded-2xl py-3 text-xs"><ScanLine size={13} /> Scan car</NeonButton>
         </div>
       </section>
 

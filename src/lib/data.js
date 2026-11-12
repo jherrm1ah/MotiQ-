@@ -232,3 +232,78 @@ export async function saveTrip(uid, t) {
   }).select().single(), "trip");
 }
 export async function clearTrips(uid) { ok(await supabase.from("trips").delete().eq("owner_id", uid), "trips"); }
+
+// ---- Fuel log
+export async function loadFuel(uid) {
+  return ok(await supabase.from("fuel_logs").select("*").eq("owner_id", uid).order("odometer", { ascending: false }).limit(500), "fuel log");
+}
+export async function addFuel(uid, f, currency) {
+  return ok(await supabase.from("fuel_logs").insert({
+    owner_id: uid, vehicle_id: f.vehicle_id, filled_on: f.filled_on || todayISO(), odometer: Math.round(Number(f.odometer)),
+    amount: Number(f.amount), cost: f.cost === "" || f.cost == null ? null : Number(f.cost), currency, full_tank: f.full_tank !== false,
+  }).select().single(), "fill-up");
+}
+export async function deleteFuel(id) { ok(await supabase.from("fuel_logs").delete().eq("id", id), "fill-up"); }
+
+// Consumption between full tanks, in the driver's units: litres per 100 km, or miles per gallon.
+export function fuelStats(logs, unit = "km") {
+  const rows = [...logs].sort((a, b) => a.odometer - b.odometer);
+  const legs = [];
+  let lastFull = null, amountSince = 0;
+  for (const r of rows) {
+    if (lastFull) amountSince += Number(r.amount);
+    if (r.full_tank) {
+      if (lastFull && r.odometer > lastFull.odometer && amountSince > 0) {
+        const dist = r.odometer - lastFull.odometer;
+        legs.push({ at: r.filled_on, dist, amount: amountSince, value: unit === "mi" ? dist / amountSince : (amountSince / dist) * 100 });
+      }
+      lastFull = r; amountSince = 0;
+    }
+  }
+  const avg = legs.length ? legs.reduce((s, l) => s + l.value, 0) / legs.length : null;
+  const last = legs.length ? legs[legs.length - 1].value : null;
+  // Worse economy: more litres per 100 km, or fewer miles per gallon.
+  const worse = avg != null && legs.length >= 3 && (unit === "mi" ? last < avg * 0.8 : last > avg * 1.2);
+  const month = new Date().toISOString().slice(0, 7);
+  const spentThisMonth = rows.filter((r) => String(r.filled_on).slice(0, 7) === month).reduce((s, r) => s + (Number(r.cost) || 0), 0);
+  const costed = rows.filter((r) => r.cost != null);
+  const span = rows.length > 1 ? rows[rows.length - 1].odometer - rows[0].odometer : 0;
+  const costPerDist = span > 0 && costed.length > 1 ? costed.slice(1).reduce((s, r) => s + Number(r.cost), 0) / span : null;
+  return { legs, avg, last, worse, spentThisMonth, costPerDist, label: unit === "mi" ? "mpg" : "L/100 km" };
+}
+
+// ---- Market safety
+export async function reportListing(uid, listingId, reason, details = "") {
+  const res = await supabase.from("listing_reports").insert({ listing_id: listingId, reporter_id: uid, reason, details: details.slice(0, 500) });
+  if (res.error && !/duplicate|unique/i.test(res.error.message)) throw new Error(res.error.message);
+}
+export async function loadBlocks(uid) { return ok(await supabase.from("user_blocks").select("blocked_id").eq("blocker_id", uid), "blocks").map((b) => b.blocked_id); }
+export async function blockUser(uid, other) { const res = await supabase.from("user_blocks").insert({ blocker_id: uid, blocked_id: other }); if (res.error && !/duplicate/i.test(res.error.message)) throw new Error(res.error.message); }
+export async function unblockUser(uid, other) { ok(await supabase.from("user_blocks").delete().eq("blocker_id", uid).eq("blocked_id", other), "blocks"); }
+
+// ---- VIN and recalls (NHTSA's free public databases; recalls cover cars sold in the US)
+export async function decodeVin(vin) {
+  const v = String(vin || "").toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
+  if (v.length !== 17) throw new Error("A VIN has 17 letters and numbers (no I, O or Q).");
+  const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${v}?format=json`);
+  if (!res.ok) throw new Error("Couldn't look up that VIN. Try again.");
+  const r = ((await res.json()).Results || [])[0] || {};
+  const title = (s) => String(s || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+  if (!r.Make) throw new Error("That VIN wasn't recognised. Check it, or enter the car's details yourself.");
+  return { vin: v, make: title(r.Make), model: String(r.Model || "").trim(), year: r.ModelYear ? Number(r.ModelYear) : "", trim_level: String(r.Trim || "").trim(),
+    fuel: /electric/i.test(r.FuelTypePrimary) ? "electric" : /diesel/i.test(r.FuelTypePrimary) ? "diesel" : /hybrid/i.test(r.ElectrificationLevel || "") ? "hybrid" : "petrol" };
+}
+export async function readVinFromPhoto(uid, file) {
+  const path = await uploadPhoto("ai-photos", uid, file);
+  const { data, error } = await supabase.functions.invoke("motiq-ai", { body: { mode: "vin", imagePath: path, message: "Read the VIN" } });
+  if (error) { let msg = "Couldn't read the VIN. Type it instead."; try { const b = await error.context.json(); if (b && b.error) msg = b.error; } catch (e) {} throw new Error(msg); }
+  const vin = String(data.reply || "").toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
+  if (vin.length !== 17) throw new Error("Couldn't find a VIN in that photo. Try a closer, sharper shot, or type it.");
+  return vin;
+}
+export async function loadRecalls(car) {
+  if (!car.make || !car.model || !car.year) return [];
+  const res = await fetch(`https://api.nhtsa.gov/recalls/recallsByVehicle?make=${encodeURIComponent(car.make)}&model=${encodeURIComponent(car.model)}&modelYear=${car.year}`);
+  if (!res.ok) throw new Error("Couldn't check recalls right now.");
+  return ((await res.json()).results || []).map((r) => ({ id: r.NHTSACampaignNumber, component: r.Component, summary: r.Summary, consequence: r.Consequence, remedy: r.Remedy, date: r.ReportReceivedDate }));
+}

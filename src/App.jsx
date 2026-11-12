@@ -3,7 +3,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
-import { loadProfile, loadGarage, loadDocuments, loadTrips, saveTrip, healthOf, reminderState } from "./lib/data.js";
+import { loadProfile, loadGarage, loadDocuments, loadTrips, loadFuel, loadBlocks, saveTrip, healthOf, reminderState } from "./lib/data.js";
+import { syncReminders } from "./lib/notify.js";
 import { connectAdapter, readLive } from "./lib/obd.js";
 import { currentPosition, geocode, drivingRoute } from "./lib/geo.js";
 import { speak as speakText, stopSpeaking } from "./lib/voice.js";
@@ -49,6 +50,10 @@ function Motiq() {
   const [garage, setGarage] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [trips, setTrips] = useState([]);
+  const [fuel, setFuel] = useState([]);
+  const [blocks, setBlocks] = useState([]);
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine !== false));
+  const [fromCache, setFromCache] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [active, setActive] = useState(() => new URLSearchParams(window.location.search).get("tab") || "home");
   const [marketFilter, setMarketFilter] = useState(null);
@@ -68,14 +73,36 @@ function Motiq() {
     return () => sub.subscription.unsubscribe();
   }, []);
   const uid = session && session.user && session.user.id;
+  // Everything loads in one go; a copy is kept on the phone so Motiq opens instantly and still
+  // shows your garage with no signal (changes need a connection).
+  const cacheKey = uid ? `motiq.cache.${uid}` : null;
   const reload = useCallback(async () => {
     if (!uid) return;
     try {
-      const [p, g, d, t] = await Promise.all([loadProfile(uid), loadGarage(uid), loadDocuments(uid).catch(() => []), loadTrips(uid).catch(() => [])]);
-      setMe(p); setGarage(g); setDocuments(d); setTrips(t); setLoadError("");
-    } catch (e) { setLoadError(e.message || "Couldn't load your garage."); }
+      const [p, g, d, t, f, b] = await Promise.all([loadProfile(uid), loadGarage(uid), loadDocuments(uid).catch(() => []), loadTrips(uid).catch(() => []), loadFuel(uid).catch(() => []), loadBlocks(uid).catch(() => [])]);
+      setMe(p); setGarage(g); setDocuments(d); setTrips(t); setFuel(f); setBlocks(b); setLoadError(""); setFromCache(false);
+      local.set(`motiq.cache.${uid}`, { p, g, d, t, f, b, at: Date.now() });
+    } catch (e) {
+      const c = local.get(`motiq.cache.${uid}`, null);
+      if (c && c.p) { setMe((m) => m || c.p); setGarage((x) => x || c.g); setFromCache(true); }
+      else setLoadError(e.message || "Couldn't load your garage.");
+    }
   }, [uid]);
-  useEffect(() => { setMe(null); setGarage(null); if (uid) reload(); }, [uid]);
+  useEffect(() => {
+    setMe(null); setGarage(null);
+    if (!uid) return;
+    const c = local.get(`motiq.cache.${uid}`, null);
+    if (c && c.p && c.g) { setMe(c.p); setGarage(c.g); setDocuments(c.d || []); setTrips(c.t || []); setFuel(c.f || []); setBlocks(c.b || []); }
+    reload();
+  }, [uid]);
+  useEffect(() => {
+    const on = () => { setOnline(true); reload(); };
+    const off = () => setOnline(false);
+    window.addEventListener("online", on); window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, [reload]);
+  // Phone reminders follow whatever's due (Android app).
+  useEffect(() => { if (garage) syncReminders({ vehicles: garage.cars, reminders: garage.reminders, documents, prefs }); }, [garage, documents, prefs]);
 
   const unit = me && me.distance_unit === "mi" ? "mi" : "km";
   const vehicles = useMemo(() => (garage ? garage.cars.map((c) => {
@@ -275,7 +302,7 @@ function Motiq() {
   }
 
   const ui = {
-    me, setMe, uid, email: session && session.user ? session.user.email : "", unit, garage, vehicles, vehicle, setCarId, documents, setDocuments, trips, setTrips, reload, prefs, setPrefs,
+    me, setMe, uid, email: session && session.user ? session.user.email : "", unit, garage, vehicles, vehicle, setCarId, documents, setDocuments, trips, setTrips, fuel, setFuel, blocks, setBlocks, online, reload, prefs, setPrefs,
     goTo, active, marketFilter, aiPrompt, clearAiPrompt: () => setAiPrompt(null), openSheet, closeSheet, confirm, showToast, signOut,
     obd, liveData, connectOBD, disconnectOBD, getLink: () => linkRef.current,
     trip, startTrip, endTrip, dismissTrip, voiceAlerts, setVoiceAlerts,
@@ -320,7 +347,12 @@ function Motiq() {
   return frame(
     <>
       <div className="flex h-full flex-col">
-        <div ref={scrollRef} className="no-scrollbar flex-1 overflow-y-auto" style={{ paddingTop: "calc(16px + env(safe-area-inset-top, 0px))" }}>
+        {(!online || fromCache) && (
+          <div role="status" className="flex items-center justify-center gap-2 px-4 text-xs font-medium" style={{ backgroundColor: "rgba(245,185,68,0.16)", color: AMBER, paddingTop: "calc(8px + env(safe-area-inset-top, 0px))", paddingBottom: 8 }}>
+            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: AMBER }} /> {online ? "Couldn't reach Motiq — showing your saved garage" : "You're offline — showing your saved garage"}
+          </div>
+        )}
+        <div ref={scrollRef} key={active} className="screen-in no-scrollbar flex-1 overflow-y-auto" style={{ paddingTop: "calc(16px + env(safe-area-inset-top, 0px))" }}>
           {active === "home" && <Home />}
           {active === "market" && <Nearby />}
           {active === "ai" && <AIScreen />}

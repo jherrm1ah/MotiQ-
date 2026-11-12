@@ -52,6 +52,9 @@ async function fakes(p, db, calls) {
     { type: "node", id: 2, lat: 6.5301, lon: 3.3712, tags: { shop: "tyres", name: "Ikeja Tyres", opening_hours: "Mo-Sa 08:00-18:00" } },
     { type: "way", id: 3, center: { lat: 6.5198, lon: 3.3851 }, tags: { amenity: "car_wash", name: "Shine Car Wash" } },
   ] }); });
+  await p.route(/tile\.openstreetmap\.org/, (route) => { calls.push("tile"); return route.fulfill({ status: 204, body: "" }); });
+  await p.route(/vpic\.nhtsa/, (route) => json(route, { Results: [{ Make: "TOYOTA", Model: "Corolla", ModelYear: "2014", Trim: "LE", FuelTypePrimary: "Gasoline" }] }));
+  await p.route(/api\.nhtsa\.gov\/recalls/, (route) => json(route, { results: [{ NHTSACampaignNumber: "19V182000", Component: "AIR BAGS", Summary: "The airbag inflator may rupture.", Remedy: "Dealers will replace the inflator, free of charge.", ReportReceivedDate: "01/03/2019" }] }));
   await p.route(/nominatim/, (route) => json(route, [{ lat: "6.6018", lon: "3.3515", display_name: "Ikeja, Lagos" }]));
   await p.route(/router\.project-osrm/, (route) => json(route, { routes: [{ distance: 12400, duration: 1500, geometry: { coordinates: [[3.3792, 6.5244], [3.37, 6.56], [3.3515, 6.6018]] } }] }));
   await p.route(/api\.jamendo\.com/, (route) => { calls.push("jamendo"); return json(route, { results: [
@@ -66,11 +69,12 @@ async function fakes(p, db, calls) {
   const errs = [];
   const db = {
     profiles: [{ id: ME, name: "Ada Obi", country: "", currency: "USD", distance_unit: "km", city: "", phone: "", created_at: "2026-03-02T10:00:00Z" }],
-    vehicles: [], service_records: [], reminders: [], scans: [], ai_messages: [], conversations: [], messages: [], vehicle_documents: [], trips: [],
+    vehicles: [], service_records: [], reminders: [], scans: [], ai_messages: [], conversations: [], messages: [], vehicle_documents: [], trips: [], fuel_logs: [], listing_reports: [], user_blocks: [],
     listings: [{ id: uuid(), seller_id: SELLER, kind: "part", category: "Brakes", title: "Corolla front brake pads", description: "Brand new, still boxed.", price: 25000, currency: "NGN", condition: "new", country: "NG", city: "Lagos", fits_make: "Toyota", fits_model: "Corolla", fits_year_from: 2014, fits_year_to: 2018, photos: [], status: "active", created_at: now(), seller: { id: SELLER, name: "Tunde", city: "Lagos", country: "NG" } }],
   };
   const calls = [];
-  const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, geolocation: HERE, permissions: ["geolocation"] });
+  const STORE = process.env.STORE_SHOTS;
+  const ctx = await b.newContext({ viewport: STORE ? { width: 412, height: 732 } : { width: 390, height: 844 }, deviceScaleFactor: STORE ? 2.625 : 2, acceptDownloads: true, geolocation: HERE, permissions: ["geolocation"] });
   const p = await ctx.newPage(); p.on("pageerror", (e) => errs.push(e.message));
   await fakes(p, db, calls);
   await p.addInitScript((ME) => {
@@ -81,8 +85,9 @@ async function fakes(p, db, calls) {
   const wait = (ms = 450) => p.waitForTimeout(ms);
   const nav = (name) => p.getByRole("navigation", { name: "Main" }).getByRole("button", { name, exact: true }).click();
   const dialog = () => p.getByRole("dialog");
-  const shot = (n) => p.screenshot({ path: `${S}/motiq-${n}.png` });
+  const shot = (n) => p.screenshot({ path: STORE ? `${STORE}/${n}.png` : `${S}/motiq-${n}.png` });
 
+  let t = "";
   // 1) First run: country sets currency and distance.
   await p.goto("http://localhost:4322/", { waitUntil: "domcontentloaded" }); await wait(1500);
   out.welcome = (await body()).includes("welcome to motiq");
@@ -95,11 +100,13 @@ async function fakes(p, db, calls) {
 
   // 2) Add a car from the empty Home.
   await p.getByRole("button", { name: "Add your car" }).click(); await wait();
-  await dialog().getByLabel("Make").fill("Toyota"); await dialog().getByLabel("Model").fill("Corolla");
-  await dialog().getByLabel("Year").fill("2014"); await dialog().getByLabel("Odometer (km)").fill("85000");
+  await dialog().getByLabel("VIN", { exact: true }).fill("2T1BURHE0EC123456");
+  await dialog().getByRole("button", { name: "Look up VIN" }).click(); await wait(700);
+  out.vinLookup = (await dialog().getByLabel("Make").inputValue()) === "Toyota" && (await dialog().getByLabel("Model").inputValue()) === "Corolla" && (await dialog().getByLabel("Year").inputValue()) === "2014";
+  await dialog().getByLabel("Odometer (km)").fill("85000");
   await dialog().getByRole("button", { name: "Add car" }).click(); await wait(1000);
-  let t = await body();
-  out.carAdded = db.vehicles.length === 1 && t.includes("hi, ada") && t.includes("2014 toyota corolla");
+  t = await body();
+  out.carAdded = db.vehicles.length === 1 && db.vehicles[0].vin === "2T1BURHE0EC123456" && t.includes("hi, ada") && t.includes("2014 toyota corolla");
   out.healthShown = t.includes("vehicle health") && t.includes("100%");
   await shot("home");
 
@@ -115,6 +122,22 @@ async function fakes(p, db, calls) {
   await dialog().getByRole("button", { name: "Add reminder" }).click(); await wait(900);
   out.reminder = db.reminders.length === 1 && db.reminders[0].every_months === 6 && (await body()).includes("oil and filter change");
   await shot("garage");
+  await p.getByRole("button", { name: "Fuel log" }).click(); await wait();
+  for (const [odo, litres, cost] of [["85000", "40", "30000"], ["85500", "35", "26000"]]) {
+    await dialog().getByLabel("Odometer (km)").fill(odo); await dialog().getByLabel("Fuel (L)").fill(litres); await dialog().getByLabel("Cost (NGN)").fill(cost);
+    await dialog().getByRole("button", { name: "Add fill-up" }).click(); await wait(600);
+  }
+  t = (await dialog().innerText()).toLowerCase();
+  out.fuelLog = db.fuel_logs.length === 2 && t.includes("7.0 l/100 km") && t.includes("₦56,000");
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  await p.getByRole("button", { name: "Recalls & issues" }).click(); await wait(900);
+  t = (await dialog().innerText()).toLowerCase();
+  out.recalls = t.includes("air bags") && t.includes("free of charge") && t.includes("known problems for this model");
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  const dl = p.waitForEvent("download", { timeout: 8000 }).catch(() => null);
+  await p.getByRole("button", { name: /Share car history/ }).click();
+  const file = await dl;
+  out.historyPdf = !!file && /history\.pdf$/.test(file.suggestedFilename());
 
   // 4) Scan: demo with problems, explained with a verdict.
   await p.getByRole("button", { name: "Scan", exact: true }).click(); await wait(600);
@@ -141,6 +164,7 @@ async function fakes(p, db, calls) {
   // 6) Nearby: real places around you, with directions.
   await nav("Nearby"); await wait(1500);
   t = await body();
+  out.realMap = calls.includes("tile") && (await p.locator(".leaflet-interactive").count()) >= 4;
   out.placesListed = calls.includes("overpass") && t.includes("lagos auto repair") && t.includes("ikeja tyres") && t.includes("3 nearby");
   await shot("nearby");
   await p.getByRole("button", { name: /Lagos Auto Repair/ }).first().click(); await wait();
@@ -154,6 +178,11 @@ async function fakes(p, db, calls) {
   // 7) Market: message a seller, post a listing.
   await p.getByRole("tab", { name: "Market" }).click(); await wait(900);
   out.marketList = (await body()).includes("corolla front brake pads");
+  await p.getByRole("button", { name: "Corolla front brake pads" }).click(); await wait();
+  await dialog().getByRole("button", { name: "Report" }).click(); await wait();
+  await dialog().getByRole("button", { name: "Looks like a scam" }).click();
+  await dialog().getByRole("button", { name: "Send report" }).click(); await wait(700);
+  out.reported = db.listing_reports.length === 1 && db.listing_reports[0].reason === "scam";
   await p.getByRole("button", { name: "Corolla front brake pads" }).click(); await wait();
   await dialog().getByRole("button", { name: "Message the seller" }).click(); await wait(800);
   await p.getByLabel("Message", { exact: true }).fill("Is this still available?");
@@ -193,6 +222,7 @@ async function fakes(p, db, calls) {
   await p.getByRole("button", { name: /Open Car Mode/ }).click(); await wait(900);
   t = await body();
   out.carModeGreeting = t.includes("car mode") && t.includes("fault code");
+  out.carModeDark = (await p.getByRole("dialog", { name: "Car Mode" }).evaluate((el) => getComputedStyle(el).backgroundColor)) === "rgb(10, 10, 10)";
   await p.getByRole("button", { name: "How's my car?" }).click(); await wait(1500);
   out.carModeAnswer = (await body()).includes("lean fuel mixture");
   await shot("carmode");
@@ -216,6 +246,12 @@ async function fakes(p, db, calls) {
   await dialog().getByRole("button", { name: "Close" }).click(); await nav("Home"); await wait(500);
   out.lightMode = (await p.evaluate(() => getComputedStyle(document.querySelector("#root > div")).backgroundColor)) === "rgb(224, 224, 224)";
   await shot("home-light");
+
+  // 13) No signal: the saved garage stays, with a banner.
+  await ctx.setOffline(true); await wait(400);
+  t = await body();
+  out.offlineBanner = t.includes("you're offline") && t.includes("2014 toyota corolla");
+  await ctx.setOffline(false);
 
   out.errs = errs;
   console.log(JSON.stringify(out, null, 1));

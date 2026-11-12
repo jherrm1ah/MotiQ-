@@ -32,12 +32,22 @@ android {
             keyAlias "androiddebugkey"
             keyPassword "android"
         }
+        // Play Store upload key: only in the release workflow, from GitHub secrets (never in the repo).
+        if (System.getenv("MOTIQ_UPLOAD_KEYSTORE")) {
+            release {
+                storeFile file(System.getenv("MOTIQ_UPLOAD_KEYSTORE"))
+                storePassword System.getenv("MOTIQ_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("MOTIQ_KEY_ALIAS")
+                keyPassword System.getenv("MOTIQ_KEY_PASSWORD")
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
+            if (System.getenv("MOTIQ_UPLOAD_KEYSTORE")) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
