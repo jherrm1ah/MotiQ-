@@ -1,6 +1,7 @@
 // Floating pill navigation: the active tab expands into a labelled pill; AI is its own circle.
 import React from "react";
 import { Home, MapPin, Car, User, Bot } from "lucide-react";
+import { t } from "../lib/i18n.js";
 import { useTheme, ACCENT } from "../design.jsx";
 
 const NAV_ITEMS = [
@@ -19,9 +20,9 @@ export default function BottomNav({ active, setActive }) {
         {NAV_ITEMS.map((item) => {
           const on = active === item.key;
           return (
-            <button key={item.key} onClick={() => setActive(item.key)} aria-label={item.label} aria-current={on ? "page" : undefined} className="flex items-center active:scale-95 transition-all duration-200" style={{ borderRadius: 999, gap: 8, padding: on ? "10px 16px" : "10px", backgroundColor: on ? FILL_TEXT : "transparent" }}>
+            <button key={item.key} onClick={() => setActive(item.key)} aria-label={item.label} title={t(item.label)} aria-current={on ? "page" : undefined} className="flex items-center active:scale-95 transition-all duration-200" style={{ borderRadius: 999, gap: 8, padding: on ? "10px 16px" : "10px", backgroundColor: on ? FILL_TEXT : "transparent" }}>
               <item.icon size={18} strokeWidth={2} style={{ color: on ? (neon ? ACCENT : FILL) : FILL_TEXT, opacity: on ? 1 : 0.55 }} />
-              {on && <span className="fade-in font-semibold" style={{ fontSize: 14, color: FILL }}>{item.label}</span>}
+              {on && <span className="fade-in font-semibold" style={{ fontSize: 14, color: FILL }}>{t(item.label)}</span>}
             </button>
           );
         })}

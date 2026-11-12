@@ -23,8 +23,11 @@ import Profile, { Welcome } from "./screens/Profile.jsx";
 import { TripScreen, TripHistoryScreen } from "./screens/Trip.jsx";
 import MusicScreen, { MiniPlayer, CarMode } from "./screens/Music.jsx";
 import ScanScreen from "./screens/Scan.jsx";
+import Dashboard from "./screens/Dashboard.jsx";
+import AdminScreen from "./screens/Admin.jsx";
+import { setLanguage } from "./lib/i18n.js";
 
-const IDLE_TRIP = { status: "idle", origin: "", destination: "", totalKm: 0, coveredKm: 0, kmh: 0, elapsedSec: 0, alerts: [], gps: "pending", route: null, realRoute: false, offRoute: false, dest: null };
+const IDLE_TRIP = { free: false, still: 0, status: "idle", origin: "", destination: "", totalKm: 0, coveredKm: 0, kmh: 0, elapsedSec: 0, alerts: [], gps: "pending", route: null, realRoute: false, offRoute: false, dest: null };
 
 // Next open reminder for a car, e.g. { title: "Oil and filter change", when: "in 12 days" }.
 function nextDueOf(car, reminders, unit) {
@@ -94,6 +97,18 @@ function Motiq() {
     const c = local.get(`motiq.cache.${uid}`, null);
     if (c && c.p && c.g) { setMe(c.p); setGarage(c.g); setDocuments(c.d || []); setTrips(c.t || []); setFuel(c.f || []); setBlocks(c.b || []); }
     reload();
+  }, [uid]);
+  // Back from paying for Motiq Pro (web: ?pro=done; app: the payment browser closes). The webhook
+  // may take a few seconds, so check a few times.
+  useEffect(() => {
+    if (!uid) return;
+    const check = (n) => loadProfile(uid).then((p) => { if (!p) return; if (p.plan === "pro") { setMe(p); showToast("Welcome to Motiq Pro"); } else if (n > 0) setTimeout(() => check(n - 1), 3000); }).catch(() => {});
+    if (/[?&]pro=done/.test(window.location.search)) { window.history.replaceState(null, "", window.location.pathname); check(5); }
+    let sub;
+    if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+      import("@capacitor/browser").then(({ Browser }) => Browser.addListener("browserFinished", () => check(3))).then((h) => { sub = h; }).catch(() => {});
+    }
+    return () => { sub && sub.remove(); };
   }, [uid]);
   useEffect(() => {
     const on = () => { setOnline(true); reload(); };
@@ -252,6 +267,9 @@ function Motiq() {
           if (!off && t.offRoute) alerts.unshift({ id: `on-${now}`, kind: "on", title: "Back on route", detail: "You're back on the planned route.", at: t.elapsedSec, ts: now });
           offRoute = off;
         }
+        // Auto trips have no destination: they end after 4 minutes standing still.
+        const still = kmh < 3 ? (t.still || now) : 0;
+        if (t.free) return { ...t, coveredKm: covered, kmh, gps: "gps", alerts: alerts.slice(0, 12), still, status: still && now - still > 240000 ? "arrived" : "active" };
         const arrived = (t.dest && haversineKm({ lat, lon }, t.dest) < 0.15) || covered >= t.totalKm * 1.02;
         return { ...t, coveredKm: covered, kmh, gps: "gps", alerts: alerts.slice(0, 12), offRoute, status: arrived ? "arrived" : "active" };
       });
@@ -264,6 +282,41 @@ function Motiq() {
     alertCount.current = trip.alerts.length;
   }, [trip.alerts]);
   useEffect(() => { if (trip.status === "arrived") { showToast(`You've arrived at ${trip.destination}`); speakAlert(`You've arrived at ${trip.destination}.`); } }, [trip.status]);
+
+  // Auto trips: while Motiq is open and the setting is on, a trip starts by itself once you've
+  // been moving faster than 15 km/h for about 20 seconds, and saves itself when you park.
+  const moving = useRef(null);
+  useEffect(() => {
+    if (!prefs.autoTrips || trip.status !== "idle" || !navigator.geolocation) return;
+    const id = navigator.geolocation.watchPosition((pos) => {
+      const kmh = pos.coords.speed != null && pos.coords.speed >= 0 ? pos.coords.speed * 3.6 : 0;
+      if (kmh < 15) { moving.current = null; return; }
+      if (!moving.current) moving.current = pos.timestamp || Date.now();
+      else if ((pos.timestamp || Date.now()) - moving.current > 20000) {
+        moving.current = null;
+        lastFix.current = null;
+        setTrip({ ...IDLE_TRIP, status: "active", free: true, origin: "Auto trip", destination: new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) });
+        showToast("Trip started automatically");
+      }
+    }, () => {}, { enableHighAccuracy: false, maximumAge: 5000, timeout: 20000 });
+    return () => navigator.geolocation.clearWatch(id);
+  }, [prefs.autoTrips, trip.status]);
+  useEffect(() => { if (trip.status === "arrived" && trip.free) { recordTrip(trip, true); setTrip(IDLE_TRIP); showToast(`Trip saved — ${trip.coveredKm.toFixed(1)} km`); } }, [trip.status]);
+
+  // Live engine warnings from the adapter, spoken once every few minutes at most.
+  const warned = useRef({});
+  useEffect(() => {
+    if (!liveData) return;
+    const warn = (key, text) => {
+      const last = warned.current[key] || 0;
+      if (Date.now() - last < 300000) return;
+      warned.current[key] = Date.now();
+      showToast(text); speakText(text).catch(() => {});
+    };
+    if (liveData.coolant_c != null && liveData.coolant_c >= 108) warn("hot", "Engine temperature is very high. Pull over safely, turn the engine off and let it cool.");
+    else if (liveData.coolant_c != null && liveData.coolant_c >= 103) warn("warm", "Engine is running hot. Watch the temperature and avoid hard driving.");
+    if (liveData.battery_v != null && liveData.rpm > 400 && liveData.battery_v < 12.8) warn("charge", "The battery isn't charging properly. Get the alternator checked soon.");
+  }, [liveData]);
 
   // ---- Music (Car Mode Radio): keeps playing across screens.
   const audioRef = useRef(null);
@@ -341,9 +394,10 @@ function Motiq() {
     </div>
   );
   if (!me || !garage) return frame(<Splash />, theme.BG);
+  setLanguage(me.language || "en");
   if (!me.country) return frame(<div className="no-scrollbar h-full overflow-y-auto" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}><Welcome /></div>);
 
-  const subScreen = active === "trip" || active === "trip-history" || active === "scan" || active === "music";
+  const subScreen = ["trip", "trip-history", "scan", "music", "dash", "admin"].includes(active);
   return frame(
     <>
       <div className="flex h-full flex-col">
@@ -362,6 +416,8 @@ function Motiq() {
           {active === "trip" && <TripScreen onBack={() => goTo("home")} onHistory={() => goTo("trip-history")} />}
           {active === "trip-history" && <TripHistoryScreen onBack={() => goTo("trip")} />}
           {active === "scan" && <ScanScreen onBack={() => goTo("home")} />}
+          {active === "dash" && <Dashboard onBack={() => goTo("home")} />}
+          {active === "admin" && <AdminScreen onBack={() => goTo("profile")} />}
         </div>
       </div>
       <BottomNav active={subScreen ? null : active} setActive={goTo} />

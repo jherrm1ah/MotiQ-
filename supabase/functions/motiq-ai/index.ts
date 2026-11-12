@@ -22,7 +22,8 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 class UserError extends Error {}
 
 const MODEL = "claude-opus-5-5";
-const DAILY_LIMIT = 60; // questions per person per day
+const DAILY_LIMIT = { free: 15, pro: 100 }; // questions per person per day
+const LANGS: Record<string, string> = { en: "English", fr: "French", es: "Spanish", pt: "Portuguese", ar: "Arabic", sw: "Swahili", ha: "Hausa", yo: "Yoruba" };
 
 const RULES = `You are Motiq, a friendly, expert car mechanic inside the Motiq app. You help drivers anywhere in the world understand their car: warning lights, sounds, smells, OBD-II fault codes, maintenance, costs and what to do next.
 
@@ -72,16 +73,20 @@ Deno.serve(async (req) => {
     if (!message) throw new UserError("Ask something about your car.");
     if (!Deno.env.get("ANTHROPIC_API_KEY")) throw new UserError("The AI mechanic isn't switched on yet. The Motiq team needs to add its key.");
 
+    // The driver, and the car (yours, or one shared with you) and what Motiq knows about it.
+    const vehicleId = body.vehicleId ? String(body.vehicleId) : null;
+    const [{ data: me }, { data: carRow }, { data: membership }] = await Promise.all([
+      admin.from("profiles").select("name, country, currency, distance_unit, city, language, plan, pro_until").eq("id", uid).maybeSingle(),
+      vehicleId ? admin.from("vehicles").select("*").eq("id", vehicleId).maybeSingle() : Promise.resolve({ data: null }),
+      vehicleId ? admin.from("vehicle_members").select("member_id").eq("vehicle_id", vehicleId).eq("member_id", uid).maybeSingle() : Promise.resolve({ data: null }),
+    ]);
+    const car = carRow && (carRow.owner_id === uid || membership) ? carRow : null;
+    const pro = me?.plan === "pro" && (!me.pro_until || new Date(me.pro_until) > new Date());
+    const limit = pro ? DAILY_LIMIT.pro : DAILY_LIMIT.free;
     const since = new Date(Date.now() - 86400000).toISOString();
     const { count } = await admin.from("ai_messages").select("id", { count: "exact", head: true }).eq("owner_id", uid).eq("role", "user").gte("created_at", since);
-    if ((count ?? 0) >= DAILY_LIMIT) throw new UserError(`You've asked ${DAILY_LIMIT} questions today. Try again tomorrow.`);
-
-    // The car (only one of yours) and what Motiq knows about it.
-    const vehicleId = body.vehicleId ? String(body.vehicleId) : null;
-    const [{ data: me }, { data: car }] = await Promise.all([
-      admin.from("profiles").select("name, country, currency, distance_unit, city").eq("id", uid).maybeSingle(),
-      vehicleId ? admin.from("vehicles").select("*").eq("id", vehicleId).eq("owner_id", uid).maybeSingle() : Promise.resolve({ data: null }),
-    ]);
+    if ((count ?? 0) >= limit) throw new UserError(pro ? `You've asked ${limit} questions today. Try again tomorrow.` : `You've used today's ${limit} free questions. Upgrade to Motiq Pro for ${DAILY_LIMIT.pro} a day, or try again tomorrow.`);
+    const language = LANGS[me?.language || "en"] || "English";
     const [{ data: services }, { data: reminders }, { data: scans }, { data: history }] = await Promise.all([
       car ? admin.from("service_records").select("title, done_on, odometer, notes").eq("vehicle_id", car.id).order("done_on", { ascending: false }).limit(12) : Promise.resolve({ data: [] }),
       car ? admin.from("reminders").select("title, due_on, due_odometer").eq("vehicle_id", car.id).is("done_at", null).limit(10) : Promise.resolve({ data: [] }),
@@ -90,7 +95,7 @@ Deno.serve(async (req) => {
         .match(car ? { vehicle_id: car.id } : {}).order("created_at", { ascending: false }).limit(16),
     ]);
 
-    const driver = `Driver: ${me?.name || "unknown name"}${me?.city ? `, ${me.city}` : ""}${me?.country ? ` (${me.country})` : ""}. Currency: ${me?.currency || "USD"}. Distance unit: ${me?.distance_unit || "km"}. Today: ${new Date().toISOString().slice(0, 10)}.`;
+    const driver = `Driver: ${me?.name || "unknown name"}${me?.city ? `, ${me.city}` : ""}${me?.country ? ` (${me.country})` : ""}. Currency: ${me?.currency || "USD"}. Distance unit: ${me?.distance_unit || "km"}. Today: ${new Date().toISOString().slice(0, 10)}.${language !== "English" ? ` Always reply in ${language}, whatever language the question is in (keep fault codes and the [VERDICT:...] tag as they are).` : ""}`;
     const context = `${driver}\n${carContext(car, services || [], reminders || [], (scans || [])[0], me)}`;
 
     // Earlier turns (oldest first), then this question, with the photo if there is one.

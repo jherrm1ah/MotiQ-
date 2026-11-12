@@ -2,6 +2,7 @@
 // every screen shares (cards, sheets, toasts, rings, badges). Screens read colours with useTheme()
 // and app-wide actions (navigate, open a sheet, toast, OBD, trips, music) with useUI().
 import React, { Component, createContext, useContext, useEffect, useState } from "react";
+import { reportError } from "./lib/errors.js";
 import { X, ChevronRight, ArrowLeft, AlertTriangle, Disc3, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 
 // The neon stays the same in both modes; only the surfaces and text invert.
@@ -367,7 +368,7 @@ export function NeonButton({ children, onClick, disabled, className = "", type =
 export class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false }; }
   static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(error, info) { console.error("Motiq crashed:", error, info); }
+  componentDidCatch(error, info) { console.error("Motiq crashed:", error, info); reportError(error, "crash"); }
   render() {
     if (!this.state.hasError) return this.props.children;
     return (

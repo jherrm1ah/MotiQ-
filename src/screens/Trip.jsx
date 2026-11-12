@@ -103,16 +103,16 @@ export function TripScreen({ onBack, onHistory }) {
           ) : (
             <>
               <div className="grid grid-cols-3 gap-3">
-                {[[Gauge, Math.round(kmIn(trip.kmh, unit)), speedUnit(unit)], [MapPin, kmIn(remaining, unit).toFixed(1), `${distUnit(unit)} to go`], [Timer, `${mins}:${String(secs).padStart(2, "0")}`, "elapsed"]].map(([Icon, v, l]) => (
+                {[[Gauge, Math.round(kmIn(trip.kmh, unit)), speedUnit(unit)], trip.free ? [MapPin, kmIn(trip.coveredKm, unit).toFixed(1), `${distUnit(unit)} driven`] : [MapPin, kmIn(remaining, unit).toFixed(1), `${distUnit(unit)} to go`], [Timer, `${mins}:${String(secs).padStart(2, "0")}`, "elapsed"]].map(([Icon, v, l]) => (
                   <div key={l} className="flex flex-col items-center gap-1 rounded-2xl p-3.5" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
                     <Icon size={14} style={{ color: SUB }} /><p className="font-bold" style={{ fontSize: 18, color: TEXT }}>{v}</p><p style={{ fontSize: 10, color: SUB }}>{l}</p>
                   </div>
                 ))}
               </div>
-              <div>
+              {trip.free ? <p className="text-xs" style={{ color: SUB }}>Started automatically when you began driving. It saves itself after you've been parked for a few minutes.</p> : <div>
                 <div className="mb-1.5 flex items-center justify-between text-xs" style={{ color: SUB }}><span>{fmtDist(trip.coveredKm, unit)} covered</span><span>{fmtDist(trip.totalKm, unit)} total</span></div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: CARD_ALT }}><div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, progress * 100)}%`, backgroundColor: FILL }} /></div>
-              </div>
+              </div>}
               <div className="flex items-center gap-2 rounded-2xl px-4 py-3" style={{ backgroundColor: "rgba(239,255,0,0.08)", border: `1px solid ${BORDER}` }}>
                 <ShieldCheck size={14} style={{ color: ACCENT }} className="shrink-0" />
                 <p className="text-xs leading-relaxed" style={{ color: TEXT }}>Eyes on the road. Keep your seatbelt on and let a passenger handle the phone.</p>

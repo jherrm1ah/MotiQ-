@@ -3,10 +3,11 @@
 // Website: the browser's (Chrome and Edge listen; most browsers can speak).
 import { SpeechRecognition } from "@capacitor-community/speech-recognition";
 import { TextToSpeech } from "@capacitor-community/text-to-speech";
+import { language, speechLang } from "./i18n.js";
 
 const native = () => typeof window !== "undefined" && !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const WebRecognition = typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
-const lang = () => (typeof navigator !== "undefined" && navigator.language) || "en-US";
+const lang = () => (language() !== "en" ? speechLang() : (typeof navigator !== "undefined" && navigator.language) || "en-US");
 
 export function canListen() { return native() || !!WebRecognition; }
 export function canSpeak() { return native() || (typeof window !== "undefined" && "speechSynthesis" in window); }
