@@ -4,7 +4,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ScanLine, Gauge, ShieldAlert, Timer, Droplets, Sparkles, Camera, Plus, Send, Mic, Loader2, Clock, Wrench, AudioLines, Bot, Trash2, ImagePlus, BadgeDollarSign } from "lucide-react";
 import { t } from "../lib/i18n.js";
-import { useTheme, useUI, RED, VERDICT_STYLE, VerdictBadge, parseVerdict, ScreenHeader, RoundButton, carLabel, timeAgo, SecondaryButton, Skeleton, carFull } from "../design.jsx";
+import { ToolGrid, AMBER, GREEN, useTheme, useUI, RED, VERDICT_STYLE, VerdictBadge, parseVerdict, ScreenHeader, RoundButton, carLabel, timeAgo, SecondaryButton, Skeleton, carFull } from "../design.jsx";
 import { askMotiq, loadAiHistory, clearAiHistory, uploadPhoto, track } from "../lib/data.js";
 import { canListen, listen, stopListening } from "../lib/voice.js";
 import { describeCode } from "../lib/dtc.js";
@@ -131,12 +131,12 @@ export default function AIScreen() {
         </button>
       )}
 
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        {[["Warning light", Gauge, () => pickPhoto("light")], ["Damage check", Wrench, () => pickPhoto("damage")], ["Car value", BadgeDollarSign, carValue]].map(([label, Icon, go]) => (
-          <button key={label} onClick={go} disabled={loading} className="flex flex-col items-center gap-1.5 rounded-2xl py-3 active:scale-95 transition-transform" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
-            <Icon size={17} style={{ color: TEXT }} /><span className="text-[11px] font-medium" style={{ color: TEXT }}>{label}</span>
-          </button>
-        ))}
+      <div className="mt-3">
+        <ToolGrid cols={3} items={[
+          { icon: Gauge, label: "Warning light", color: RED, onClick: () => pickPhoto("light"), disabled: loading },
+          { icon: Wrench, label: "Damage check", color: AMBER, onClick: () => pickPhoto("damage"), disabled: loading },
+          { icon: BadgeDollarSign, label: "Car value", color: GREEN, onClick: carValue, disabled: loading },
+        ]} />
       </div>
 
       {loaded && messages.length === 0 && (

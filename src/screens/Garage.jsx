@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { t } from "../lib/i18n.js";
 import {
-  useTheme, useUI, RED, AMBER, GREEN, Ring, Field, Pill, PrimaryButton, SecondaryButton, LiveStat, Empty, ScreenHeader,
+  Section, ToolGrid, ACCENT, BLUE, CYAN, PURPLE, useTheme, useUI, RED, AMBER, GREEN, Ring, Field, Pill, PrimaryButton, SecondaryButton, LiveStat, Empty, ScreenHeader,
   carLabel, carFull, healthColor, fmtSpeed, fmtTemp,
 } from "../design.jsx";
 import {
@@ -311,11 +311,10 @@ export default function Garage() {
                     ))}
                   </div>
 
-                  <MiniRow icon={AlertTriangle} color={v.nextDue ? (v.nextDue.urgent ? RED : AMBER) : SUB} text={v.nextDue ? `${v.nextDue.title} — ${v.nextDue.when}` : "No reminders yet — add one"} onClick={() => openSheet("Add a reminder", <ReminderForm car={v} onDone={closeSheet} />)} />
-
+                  <Section title="Coming up" action="+ Reminder" onAction={() => openSheet("Add a reminder", <ReminderForm car={v} onDone={closeSheet} />)} className="mt-2">
+                  {reminders.length === 0 && <MiniRow icon={AlertTriangle} color={SUB} text="No reminders yet — add one" onClick={() => openSheet("Add a reminder", <ReminderForm car={v} onDone={closeSheet} />)} />}
                   {reminders.length > 0 && (
-                    <div className="rounded-2xl p-3" style={{ backgroundColor: CARD_ALT }}>
-                      <p className="mb-2 text-xs font-semibold" style={{ color: SUB }}>Coming up</p>
+                    <div className="rounded-2xl px-3 py-1.5" style={{ backgroundColor: CARD_ALT }}>
                       {reminders.map((r) => {
                         const st = reminderState(r, v.odometer);
                         return (
@@ -332,21 +331,24 @@ export default function Garage() {
                       })}
                     </div>
                   )}
+                  </Section>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <SmallButton icon={Wrench} label="Log service" onClick={() => openSheet("Log a service", <ServiceForm car={v} onDone={closeSheet} />)} />
-                    <SmallButton icon={Gauge} label="Odometer" onClick={() => openSheet("Update odometer", <OdometerForm car={v} onDone={closeSheet} />)} />
-                    <SmallButton icon={ScanLine} label="Scan" onClick={() => { setCarId(v.id); goTo("scan"); }} />
-                    <SmallButton icon={Bot} label="Ask AI" onClick={() => { setCarId(v.id); goTo("ai"); }} />
-                    <SmallButton icon={Fuel} label="Fuel log" onClick={() => openSheet(`Fuel log — ${carLabel(v)}`, <FuelSheet car={v} />)} />
-                    <SmallButton icon={ShieldAlert} label="Recalls & issues" onClick={() => openSheet(`Recalls & known problems`, <RecallsSheet car={v} />)} />
-                  </div>
-                  {!shared && <SmallButton icon={BadgeDollarSign} label="What's it worth? · Sell this car" onClick={() => openSheet("Sell this car", <SellCarSheet car={v} />)} />}
-                  <SmallButton icon={Share2} label="Share car history (PDF)" onClick={async () => { if (!isPro(me)) { openSheet("Motiq Pro", <UpgradeSheet />); return; } try { const r = await shareHistory({ car: v, garage, documents, fuel, me, unit }); if (r === "downloaded") showToast("History PDF downloaded"); } catch (e) { showToast(e.message || "Couldn't make the PDF"); } }} />
+                  <Section title="Tools" className="mt-2">
+                    <ToolGrid items={[
+                      { icon: Wrench, label: "Log service", color: GREEN, onClick: () => openSheet("Log a service", <ServiceForm car={v} onDone={closeSheet} />) },
+                      { icon: Gauge, label: "Odometer", color: BLUE, onClick: () => openSheet("Update odometer", <OdometerForm car={v} onDone={closeSheet} />) },
+                      { icon: ScanLine, label: "Scan", color: CYAN, onClick: () => { setCarId(v.id); goTo("scan"); } },
+                      { icon: Bot, label: "Ask AI", color: ACCENT, onClick: () => { setCarId(v.id); goTo("ai"); } },
+                      { icon: Fuel, label: "Fuel log", color: AMBER, onClick: () => openSheet(`Fuel log — ${carLabel(v)}`, <FuelSheet car={v} />) },
+                      { icon: ShieldAlert, label: "Recalls", aria: "Recalls & issues", color: RED, onClick: () => openSheet(`Recalls & known problems`, <RecallsSheet car={v} />) },
+                      !shared && { icon: BadgeDollarSign, label: "Sell car", aria: "What's it worth? · Sell this car", color: PURPLE, onClick: () => openSheet("Sell this car", <SellCarSheet car={v} />) },
+                      { icon: Share2, label: "History PDF", aria: "Share car history (PDF)", color: BLUE, onClick: async () => { if (!isPro(me)) { openSheet("Motiq Pro", <UpgradeSheet />); return; } try { const r = await shareHistory({ car: v, garage, documents, fuel, me, unit }); if (r === "downloaded") showToast("History PDF downloaded"); } catch (e) { showToast(e.message || "Couldn't make the PDF"); } } },
+                    ]} />
+                  </Section>
 
                   {services.length > 0 && (
-                    <div className="rounded-2xl p-3" style={{ backgroundColor: CARD_ALT }}>
-                      <p className="mb-2 text-xs font-semibold" style={{ color: SUB }}>Service history</p>
+                    <Section title="Service history" className="mt-2">
+                    <div className="rounded-2xl px-3 py-1.5" style={{ backgroundColor: CARD_ALT }}>
                       {services.slice(0, 6).map((s) => (
                         <div key={s.id} className="flex items-center gap-2 py-1.5">
                           <div className="min-w-0 flex-1">
@@ -359,8 +361,10 @@ export default function Garage() {
                       ))}
                       {services.length > 6 && <p className="pt-1" style={{ fontSize: 10, color: SUB }}>+{services.length - 6} older</p>}
                     </div>
+                    </Section>
                   )}
 
+                  <Section title="Documents & adapter" className="mt-2">
                   <MiniRow icon={FileText} text={docs.length ? `${docs.length} document${docs.length === 1 ? "" : "s"} — warranty, insurance, registration` : "Add warranty, insurance or registration"} onClick={() => goTo("profile")} />
 
                   {connected ? (
@@ -380,13 +384,17 @@ export default function Garage() {
                     <MiniRow icon={Bluetooth} text={obd.status === "connecting" && obd.vehicleId === v.id ? "Looking for your adapter..." : "Connect OBD-II adapter"} onClick={() => openSheet("Connect OBD-II adapter", <OBDConnectSheet onScan={() => { closeSheet(); connectOBD(v.id); }} onDemo={() => { setCarId(v.id); goTo("scan"); }} />)} />
                   )}
 
+                  </Section>
+
+                  <div className="mt-2 grid gap-2" style={{ gridTemplateColumns: shared ? "1fr" : "1.4fr 1fr 1fr" }}>
                   {shared ? (
                     <SmallButton icon={LogOut} label="Leave this shared car" color={RED} onClick={() => confirm(`Leave ${carLabel(v)}?`, "It will disappear from your garage. What you added stays with the car.", "Leave", async () => { try { await removeMember(v.id, uid); await reload(); showToast("You left the car"); } catch (e) { showToast(e.message); } })} />
                   ) : <SmallButton icon={Users} label={t("Share this car")} onClick={() => openSheet(t("Share this car"), <ShareCarSheet car={v} />)} />}
-                  {!shared && <div className="grid grid-cols-2 gap-2">
+                  {!shared && <>
                     <SmallButton icon={Pencil} label="Edit car" onClick={() => openSheet("Edit car", <CarForm car={v} onDone={closeSheet} />)} />
                     <SmallButton icon={Trash2} label="Remove" color={RED} onClick={() => confirm(`Remove ${carLabel(v)}?`, "This also removes its reminders, service history, scans and documents. This can't be undone.", "Remove", async () => { try { await deleteCar(v.id); await reload(); showToast(`${carLabel(v)} removed`); if (obd.vehicleId === v.id) disconnectOBD(true); } catch (e) { showToast(e.message); } })} />
-                  </div>}
+                  </>}
+                  </div>
                 </div>
               )}
             </div>

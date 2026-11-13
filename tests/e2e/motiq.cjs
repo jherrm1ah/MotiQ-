@@ -115,6 +115,8 @@ async function fakes(p, db, calls) {
   const nav = (name) => p.getByRole("navigation", { name: "Main" }).getByRole("button", { name, exact: true }).click();
   const dialog = () => p.getByRole("dialog");
   const shot = (n) => p.screenshot({ path: STORE ? `${STORE}/${n}.png` : `${S}/motiq-${n}.png` });
+  // Whole-screen picture for design review (FULL_SHOTS=1): a tall window so nothing is cut off.
+  const full = async (n) => { if (!process.env.FULL_SHOTS || STORE) return; await p.setViewportSize({ width: 390, height: 2400 }); await wait(400); await p.screenshot({ path: `${S}/full-${n}.png` }); await p.setViewportSize({ width: 390, height: 844 }); await wait(200); };
 
   let t = "";
   // 1) First run: country sets currency and distance.
@@ -150,7 +152,7 @@ async function fakes(p, db, calls) {
   await dialog().getByRole("button", { name: "Oil and filter change" }).click();
   await dialog().getByRole("button", { name: "Add reminder" }).click(); await wait(900);
   out.reminder = db.reminders.length === 1 && db.reminders[0].every_months === 6 && (await body()).includes("oil and filter change");
-  await shot("garage");
+  await shot("garage"); await full("garage");
   await p.getByRole("button", { name: "Fuel log" }).click(); await wait();
   for (const [odo, litres, cost] of [["85000", "40", "30000"], ["85500", "35", "26000"]]) {
     await dialog().getByLabel("Odometer (km)").fill(odo); await dialog().getByLabel("Fuel (L)").fill(litres); await dialog().getByLabel("Cost (NGN)").fill(cost);
@@ -189,7 +191,7 @@ async function fakes(p, db, calls) {
   await p.getByRole("button", { name: "Explain this scan" }).click(); await wait(1200);
   t = await body();
   out.scanExplained = t.includes("vacuum leak") && t.includes("drive with caution") && !t.includes("[verdict");
-  await shot("scan");
+  await shot("scan"); await full("scan");
   await p.getByRole("button", { name: "Back" }).click(); await wait(600);
   t = await body();
   out.homeShowsCodes = t.includes("2 fault codes from your last scan") && !t.includes("100%");
@@ -203,14 +205,14 @@ async function fakes(p, db, calls) {
   out.askReply = t.includes("brake wear indicator") && (t.match(/drive with caution/g) || []).length >= 2;
   await p.getByRole("button", { name: "Car value" }).click(); await wait(1200);
   out.carValue = (await body()).includes("private sale:") && db.ai_messages.some((m) => /worth today/.test(m.content || ""));
-  await shot("ai");
+  await shot("ai"); await full("ai");
 
   // 6) Nearby: real places around you, with directions.
   await nav("Nearby"); await wait(1500);
   t = await body();
   out.realMap = calls.includes("tile") && (await p.locator(".leaflet-interactive").count()) >= 4;
   out.placesListed = calls.includes("overpass") && t.includes("lagos auto repair") && t.includes("ikeja tyres") && t.includes("3 nearby");
-  await shot("nearby");
+  await shot("nearby"); await full("nearby");
   await p.getByRole("button", { name: /Lagos Auto Repair/ }).first().click(); await wait();
   t = await (dialog().innerText());
   out.placeSheet = /open now/i.test(t) && /allen avenue/i.test(t) && (await dialog().getByRole("button", { name: "Directions" }).count()) === 1 && (await dialog().getByRole("link", { name: /Call/ }).count()) === 1;
@@ -270,10 +272,10 @@ async function fakes(p, db, calls) {
   await dialog().getByLabel("How did it go? (optional)").fill("Fair price and quick.");
   await dialog().getByRole("button", { name: "Post review" }).click(); await wait(700);
   out.reviewed = db.mechanic_reviews.length === 1 && db.mechanic_reviews[0].rating === 5;
-  await shot("quotes-done");
+  await shot("quotes-done"); await full("quotes");
 
   // 8) Profile: real name and stats; save a document.
-  await nav("Profile"); await wait(700);
+  await nav("Profile"); await wait(700); await full("profile");
   t = await body();
   out.profile = t.includes("ada obi") && t.includes("ada@example.com") && t.includes("scans run");
   await p.getByRole("button", { name: "Documents & warranty" }).click(); await wait();
@@ -330,7 +332,7 @@ async function fakes(p, db, calls) {
 
   // 8d) Admin: stats and reported listings.
   db.listing_reports.forEach((r) => { const l = db.listings.find((x) => x.id === r.listing_id); r.listing = l && { id: l.id, title: l.title, status: l.status, seller_id: l.seller_id }; });
-  await p.getByRole("button", { name: "Admin" }).click(); await wait(900);
+  await p.getByRole("button", { name: "Admin" }).click(); await wait(900); await full("admin");
   t = await body();
   out.admin = t.includes("1,234") && t.includes("corolla front brake pads");
   out.adminUsage = t.includes("42 active users") && t.includes("open home") && t.includes("mechanic payments");
@@ -347,7 +349,7 @@ async function fakes(p, db, calls) {
   // 10) Car Mode Radio and the voice co-pilot.
   await p.getByRole("button", { name: /Car Mode Radio/ }).click(); await wait(1000);
   out.music = calls.includes("jamendo") && (await body()).includes("lagos drive");
-  await shot("radio");
+  await shot("radio"); await full("radio");
   await p.getByRole("button", { name: /Open Car Mode/ }).click(); await wait(900);
   t = await body();
   out.carModeGreeting = t.includes("car mode") && t.includes("fault code");
@@ -365,7 +367,7 @@ async function fakes(p, db, calls) {
   await p.getByRole("button", { name: "Start trip" }).click(); await wait(1500);
   t = await body();
   out.tripStarted = t.includes("real route") && t.includes("12.4") && t.includes("km to go");
-  await shot("trip");
+  await shot("trip"); await full("trip");
   await p.getByRole("button", { name: "End trip" }).click(); await wait(400);
 
   // 12) Light mode.
@@ -461,9 +463,9 @@ async function fakes(p, db, calls) {
   t = await body();
   out.driverToday = t.includes("today's profit") && t.includes("₦20,000");
   out.scoreCard = t.includes("driving score") && t.includes("88");
-  await shot("home-daily");
+  await shot("home-daily"); await full("home");
   await p.getByRole("button", { name: /Start a trip|Open live trip/ }).first().click(); await wait(500);
-  await p.getByRole("button", { name: "Trip history" }).click(); await wait(500);
+  await p.getByRole("button", { name: "Trip history" }).click(); await wait(500); await full("trip-history");
   await p.getByRole("button", { name: "Work trip" }).first().click(); await wait(600);
   out.workTrip = db.trips.find((x) => x.id === "trip-1").purpose === "work" && (await body()).includes("score 88");
   const mileage = p.waitForEvent("download", { timeout: 6000 }).catch(() => null);

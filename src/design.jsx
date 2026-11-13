@@ -381,3 +381,72 @@ export class ErrorBoundary extends Component {
     );
   }
 }
+
+// ---- Layout building blocks, so every screen is organised the same way.
+// A titled block of content with an optional small action on the right.
+export function Section({ title, sub, action, onAction, children, className = "" }) {
+  const { TEXT, SUB } = useTheme();
+  return (
+    <section className={`flex flex-col gap-2.5 ${className}`} aria-label={title}>
+      {title && (
+        <div className="flex items-end justify-between gap-2 px-1">
+          <div className="min-w-0">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: SUB }}>{title}</h2>
+            {sub && <p className="mt-0.5 truncate text-xs" style={{ color: TEXT }}>{sub}</p>}
+          </div>
+          {action && <button onClick={onAction} className="shrink-0 rounded-md px-1 py-0.5 text-xs font-semibold active:opacity-60" style={{ color: TEXT }}>{action}</button>}
+        </div>
+      )}
+      {children}
+    </section>
+  );
+}
+
+// Readable accent colour for text/icons: the neon yellow only works on dark backgrounds.
+export function useAccentInk() { const { mode } = useTheme(); return mode === "light" ? "#6B7500" : ACCENT; }
+
+// A grid of square tools, each with its own accent colour. items: [{ icon, label, color, onClick, aria, status, disabled }]
+export function ToolGrid({ items, cols = 4 }) {
+  const { CARD, BORDER, TEXT, SUB } = useTheme();
+  const ink = useAccentInk();
+  return (
+    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+      {items.filter(Boolean).map(({ icon: Icon, label, color, onClick, aria, status, disabled }) => {
+        const c = color === ACCENT ? ink : color || TEXT;
+        return (
+          <button key={label} type="button" onClick={onClick} disabled={disabled} aria-label={aria || label} className="flex min-w-0 flex-col items-center gap-1.5 rounded-[20px] px-1 py-3 text-center active:scale-95 transition-transform disabled:opacity-50" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl" style={{ backgroundColor: `${color || "#9E9E9E"}22` }}><Icon size={18} style={{ color: c }} strokeWidth={2} /></span>
+            <span className="w-full truncate text-[11px] font-semibold leading-tight" style={{ color: TEXT }}>{label}</span>
+            {status && <span className="-mt-1 w-full truncate text-[10px] leading-tight" style={{ color: status.color || SUB }}>{status.text || status}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// A grouped settings-style list: one rounded card, rows with a coloured icon chip.
+// items: [{ icon, label, color, onClick, value }]
+export function MenuGroup({ title, items }) {
+  const { CARD, BORDER, TEXT, SUB } = useTheme();
+  const ink = useAccentInk();
+  const rows = items.filter(Boolean);
+  if (!rows.length) return null;
+  return (
+    <Section title={title}>
+      <div className="overflow-hidden" style={{ borderRadius: 22, backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
+        {rows.map(({ icon: Icon, label, color, onClick, value }, i) => (
+          <button key={label} type="button" onClick={onClick} className="flex w-full items-center gap-3 px-4 py-3 text-left active:opacity-70" style={i ? { borderTop: `1px solid ${BORDER}` } : {}}>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: `${color || "#9E9E9E"}22` }}><Icon size={15} style={{ color: color === ACCENT ? ink : color || SUB }} /></span>
+            <span className="min-w-0 flex-1 truncate text-sm" style={{ color: TEXT }}>{label}</span>
+            {value && <span className="shrink-0 text-xs" style={{ color: SUB }}>{value}</span>}
+            <ChevronRightIcon color={SUB} />
+          </button>
+        ))}
+      </div>
+    </Section>
+  );
+}
+function ChevronRightIcon({ color }) {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>;
+}
