@@ -12,7 +12,7 @@ import { currentPosition, directionsUrl } from "../lib/geo.js";
 import { findPlaces } from "../lib/places.js";
 import {
   saveProfile, loadFuelPrices, reportFuelPrice, loadRoadAlerts, reportRoadAlert, voteRoadAlert, ROAD_ALERTS, addEarning, deleteEarning,
-  jobPriceStats, myReferralCode, redeemReferral, loadReferrals, healthOf,
+  jobPriceStats, myReferralCode, redeemReferral, loadReferrals, healthOf, loadPrivate, savePrivate,
 } from "../lib/data.js";
 import { todaysWeather, emergencyNumber, streak, badges, weekSummary, scoreColor, scoreWord, updateWidget } from "../lib/daily.js";
 
@@ -289,7 +289,9 @@ export function SosButton({ big }) {
 export function SosSheet() {
   const { me, setMe, showToast, goTo, closeSheet } = useUI();
   const { TEXT, SUB, CARD_ALT, BORDER } = useTheme();
-  const contacts = Array.isArray(me.sos_contacts) ? me.sos_contacts : [];
+  const [priv, setPriv] = useState(null);
+  useEffect(() => { loadPrivate(me.id).then(setPriv).catch(() => setPriv({ sos_contacts: [] })); }, []);
+  const contacts = priv && Array.isArray(priv.sos_contacts) ? priv.sos_contacts : [];
   const [pos, setPos] = useState(null);
   const [adding, setAdding] = useState(false);
   const [c, setC] = useState({ name: "", phone: "" });
@@ -303,13 +305,13 @@ export function SosSheet() {
     window.location.href = `sms:${to}?body=${encodeURIComponent(text)}`;
   };
   const share = async () => { try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); showToast("Copied — paste it to someone"); } } catch (e) {} };
-  const saveContacts = async (list) => { try { setMe(await saveProfile(me.id, { sos_contacts: list })); } catch (e) { showToast(/sos_contacts/.test(e.message) ? "SOS contacts need one more setup step in the database." : e.message); } };
+  const saveContacts = async (list) => { try { setPriv(await savePrivate(me.id, { sos_contacts: list })); } catch (e) { showToast(/profile_private/.test(e.message) ? "SOS contacts need one more setup step in the database." : e.message); } };
   return (
     <div className="flex flex-col gap-3">
       <a href={`tel:${num}`} className="flex items-center justify-center gap-2 rounded-2xl py-4 text-base font-bold" style={{ backgroundColor: RED, color: "#fff" }}><Phone size={18} /> Call emergency ({num})</a>
       <PrimaryButton onClick={sendSms} disabled={!pos}><Send size={15} /> {contacts.length ? `Text my location to ${contacts.length === 1 ? contacts[0].name : `${contacts.length} people`}` : "Text my location to family"}</PrimaryButton>
       <SecondaryButton onClick={share} disabled={!pos}><Share2 size={14} /> Share my location another way</SecondaryButton>
-      <SecondaryButton onClick={() => { closeSheet(); goTo("nearby", { filter: "Mechanics" }); }}><MapPin size={14} /> Nearest mechanics and help</SecondaryButton>
+      <SecondaryButton onClick={() => { closeSheet(); goTo("market", { filter: "Mechanics" }); }}><MapPin size={14} /> Nearest mechanics and help</SecondaryButton>
       {!pos && <p className="text-xs" style={{ color: SUB }}>Finding your location…</p>}
       <div className="mt-2">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: SUB }}>Emergency contacts</p>
@@ -433,7 +435,8 @@ export function InviteSheet() {
   }, []);
   const newDriver = me.created_at && Date.now() - new Date(me.created_at).getTime() < 14 * 86400000;
   const share = async () => {
-    const text = `I use Motiq to look after my car — AI mechanic, fault codes, fuel prices and more. Join with my code ${code} and I get a free month of Pro: ${window.location.origin.startsWith("http") ? window.location.origin : "https://motiq.vercel.app"}`;
+    const site = window.location.origin.startsWith("http") ? window.location.origin : (import.meta.env.VITE_PUBLIC_SITE_URL || "");
+    const text = `I use Motiq to look after my car — AI mechanic, fault codes, fuel prices and more. Join with my code ${code} and I get a free month of Pro${site ? `: ${site}` : "."}`;
     try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); showToast("Invite copied"); } } catch (e) {}
   };
   const redeem = async () => {

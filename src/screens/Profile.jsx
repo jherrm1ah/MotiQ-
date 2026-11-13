@@ -5,7 +5,9 @@ import { Globe, Wallet, User, Sun, Moon, Gauge, Bell, Music2, FileText, Shield, 
 import { t } from "../lib/i18n.js";
 import { useTheme, useUI, RED, AMBER, GREEN, ACCENT, Field, Pill, PrimaryButton, SecondaryButton, ToggleRow, Stat, TrackThumb, Logo, carLabel } from "../design.jsx";
 import { saveProfile, clearAiHistory, addDocument, deleteDocument, unblockUser } from "../lib/data.js";
-import { LanguagePicker, ExpensesSheet, ProCard } from "./ProfileExtras.jsx";
+import { LanguagePicker, ExpensesSheet, ProCard, FleetSheet } from "./ProfileExtras.jsx";
+import { CountryPapersSheet, BackgroundTripsSheet, ShareCardsSheet } from "./Growth.jsx";
+import { Truck, Bluetooth, Image as ImageIcon } from "lucide-react";
 import { WeeklySheet, InviteSheet, EarningsSheet } from "./Daily.jsx";
 import { CalendarDays, Briefcase, Gift } from "lucide-react";
 
@@ -267,6 +269,10 @@ export default function Profile() {
     ["Your week", CalendarDays, () => <WeeklySheet />],
     ["Driver earnings (Uber, Bolt…)", Briefcase, () => <DriverModeSheet />],
     ["Invite friends", Gift, () => <InviteSheet />],
+    ["Fleet dashboard", Truck, () => <FleetSheet />],
+    ["Background trips (car Bluetooth)", Bluetooth, () => <BackgroundTripsSheet />],
+    ["Share a card", ImageIcon, () => <ShareCardsSheet />],
+    ["Car papers for my country", FileText, () => <CountryPapersSheet />],
     ["Music & media", Music2, () => <MusicInfo />],
     ["Documents & warranty", FileText, () => <DocumentsSheet />],
     ["Privacy & security", Shield, () => <PrivacySheet />],

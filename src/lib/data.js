@@ -124,6 +124,7 @@ export async function saveListing(uid, l) {
     country: l.country || "", city: (l.city || "").trim(), fits_make: (l.fits_make || "").trim(), fits_model: (l.fits_model || "").trim(),
     fits_year_from: l.fits_year_from ? Number(l.fits_year_from) : null, fits_year_to: l.fits_year_to ? Number(l.fits_year_to) : null,
     photos: l.photos || [],
+    ...(l.kind === "car" && l.vehicle_id ? { vehicle_id: l.vehicle_id } : {}),
   };
   return l.id
     ? ok(await supabase.from("listings").update(row).eq("id", l.id).select().single(), "listing")
@@ -326,7 +327,7 @@ export async function removeMember(vehicleId, memberId) { ok(await supabase.from
 
 // ---- Mechanic quotes
 export async function loadMyQuoteRequests(uid) {
-  return ok(await supabase.from("quote_requests").select("*, offers:quote_offers(*, provider:profiles!quote_offers_provider_id_fkey(name, city))").eq("owner_id", uid).order("created_at", { ascending: false }).limit(30), "quotes");
+  return ok(await supabase.from("quote_requests").select("*, offers:quote_offers(*, provider:profiles!quote_offers_provider_id_fkey(name, city), listing:listings(verified))").eq("owner_id", uid).order("created_at", { ascending: false }).limit(30), "quotes");
 }
 export async function loadOpenJobs(uid) {
   return ok(await supabase.from("quote_requests").select("*, mine:quote_offers(id, price, currency, status, provider_id)").eq("status", "open").neq("owner_id", uid).order("created_at", { ascending: false }).limit(50), "jobs");
@@ -348,10 +349,11 @@ export async function myServiceListing(uid) {
 }
 
 // ---- Motiq Pro
-export const isPro = (me) => !!me && me.plan === "pro" && (!me.pro_until || new Date(me.pro_until) > new Date());
-export async function startProCheckout(months) {
+export const isFleet = (me) => !!me && me.plan === "fleet" && (!me.pro_until || new Date(me.pro_until) > new Date());
+export const isPro = (me) => !!me && (me.plan === "pro" || me.plan === "fleet") && (!me.pro_until || new Date(me.pro_until) > new Date());
+export async function startProCheckout(months, plan = "pro") {
   const returnTo = /^https:/.test(window.location.origin) ? `${window.location.origin}/?pro=done` : undefined;
-  const { data, error } = await supabase.functions.invoke("paystack-init", { body: { months, returnTo } });
+  const { data, error } = await supabase.functions.invoke("paystack-init", { body: { months, plan, returnTo } });
   if (error) { let msg = "Couldn't start the payment."; try { const b = await error.context.json(); if (b && b.error) msg = b.error; } catch (e) {} throw new Error(msg); }
   return data;
 }
@@ -408,3 +410,67 @@ export async function jobPriceStats(text, country, currency) {
 export async function myReferralCode() { return ok(await supabase.rpc("my_referral_code"), "invite code"); }
 export async function redeemReferral(code) { return ok(await supabase.rpc("redeem_referral", { p_code: code }), "invite code"); }
 export async function loadReferrals(uid) { return ok(await supabase.from("referrals").select("referred_id, created_at").eq("referrer_id", uid), "invites"); }
+
+// ---- Notifications (bell inbox, live) and push registration
+export async function loadNotifications(uid) { return ok(await supabase.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(50), "notifications"); }
+export async function markNotificationsRead(uid) { ok(await supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("user_id", uid).is("read_at", null), "notifications"); }
+export function watchNotifications(uid, onNew) {
+  const ch = supabase.channel(`notif-${uid}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${uid}` }, (p) => onNew(p.new)).subscribe();
+  return () => supabase.removeChannel(ch);
+}
+export async function savePushToken(uid, token, platform = "android") {
+  ok(await supabase.from("push_tokens").upsert({ token, user_id: uid, platform, updated_at: new Date().toISOString() }, { onConflict: "token" }), "push");
+}
+
+// ---- Mechanic reviews, ratings, verified
+export async function reviewMechanic(uid, offer, rating, comment) {
+  return ok(await supabase.from("mechanic_reviews").upsert({ offer_id: offer.id, provider_id: offer.provider_id, reviewer_id: uid, rating, comment: (comment || "").slice(0, 500) }, { onConflict: "offer_id" }).select().single(), "review");
+}
+export async function mechanicRating(providerId) { return ok(await supabase.rpc("mechanic_rating", { p_provider: providerId }), "rating"); }
+export async function loadMyReviews(uid) { return ok(await supabase.from("mechanic_reviews").select("offer_id, rating, comment").eq("reviewer_id", uid), "reviews"); }
+export async function adminSetVerified(listingId, verified) { ok(await supabase.from("listings").update({ verified }).eq("id", listingId), "listing"); }
+export async function adminServiceListings() { return ok(await supabase.from("listings").select("id, title, city, country, verified, seller:profiles!listings_seller_id_fkey(name)").eq("kind", "service").eq("status", "active").order("created_at", { ascending: false }).limit(60), "listings"); }
+
+// ---- Bookings
+export async function loadBookings(uid) { return ok(await supabase.from("bookings").select("*").or(`driver_id.eq.${uid},provider_id.eq.${uid}`).order("starts_at", { ascending: true }).limit(60), "bookings"); }
+export async function requestBooking(uid, offer, startsAt, note) {
+  return ok(await supabase.from("bookings").insert({ offer_id: offer.id, driver_id: uid, provider_id: offer.provider_id, starts_at: new Date(startsAt).toISOString(), note: (note || "").slice(0, 300) }).select().single(), "booking");
+}
+export async function setBookingStatus(id, status) { return ok(await supabase.from("bookings").update({ status }).eq("id", id).select().single(), "booking"); }
+
+// ---- Paying a mechanic through Motiq
+export async function loadJobPayments(uid) { return ok(await supabase.from("job_payments").select("*").or(`driver_id.eq.${uid},provider_id.eq.${uid}`).order("created_at", { ascending: false }).limit(60), "payments"); }
+export async function payMechanic(offerId) {
+  const returnTo = /^https:/.test(window.location.origin) ? `${window.location.origin}/?job=paid` : undefined;
+  const { data, error } = await supabase.functions.invoke("paystack-init", { body: { kind: "job", offerId, returnTo } });
+  if (error) { let msg = "Couldn't start the payment."; try { const b = await error.context.json(); if (b && b.error) msg = b.error; } catch (e) {} throw new Error(msg); }
+  return data;
+}
+export async function releaseJobPayment(id) { ok(await supabase.rpc("release_job_payment", { p_payment: id }), "payment"); }
+export async function adminJobPayments() {
+  const rows = ok(await supabase.from("job_payments").select("*, provider:profiles!job_payments_provider_id_fkey(name)").in("status", ["held", "released"]).order("created_at", { ascending: true }).limit(60), "payments");
+  const ids = [...new Set(rows.map((r) => r.provider_id))];
+  const priv = ids.length ? ok(await supabase.from("profile_private").select("id, payout_details").in("id", ids), "payout details") : [];
+  return rows.map((r) => ({ ...r, payout_details: (priv.find((p) => p.id === r.provider_id) || {}).payout_details || "" }));
+}
+
+// ---- Private profile fields (SOS contacts, payout details): only you can read them.
+export async function loadPrivate(uid) { return ok(await supabase.from("profile_private").select("*").eq("id", uid).maybeSingle(), "private details") || { id: uid, sos_contacts: [], payout_details: "" }; }
+export async function savePrivate(uid, patch) { return ok(await supabase.from("profile_private").upsert({ id: uid, ...patch, updated_at: new Date().toISOString() }, { onConflict: "id" }).select().single(), "private details"); }
+export async function adminSetJobPayment(id, status) { ok(await supabase.rpc("admin_set_job_payment", { p_payment: id, p_status: status }), "payment"); }
+
+// ---- Fleet: every trip in cars you own (your drivers' too)
+export async function loadFleetTrips(carIds) {
+  if (!carIds.length) return [];
+  return ok(await supabase.from("trips").select("id, owner_id, vehicle_id, distance_km, duration_sec, score, hard_brakes, purpose, ended_at, driver:profiles!trips_owner_id_fkey(name)").in("vehicle_id", carIds).order("ended_at", { ascending: false }).limit(500), "fleet trips");
+}
+
+// ---- Usage stats (anonymous counts of which features are used)
+const seen = new Set();
+export function track(event) {
+  const key = `${event}:${new Date().toDateString()}`;
+  if (seen.has(key)) return; // once per feature per day per session is enough
+  seen.add(key);
+  supabase.from("usage_events").insert({ event: String(event).slice(0, 40) }).then(() => {}, () => {});
+}
+export async function adminUsage(days = 7) { return ok(await supabase.rpc("admin_usage", { p_days: days }), "usage"); }
