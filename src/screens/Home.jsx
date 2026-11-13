@@ -3,17 +3,18 @@
 import React, { useEffect, useMemo } from "react";
 import {
   Bell, ChevronRight, Search, SlidersHorizontal, Camera, Car, Bluetooth, BluetoothConnected, Navigation, Music2,
-  Timer, ShieldAlert, AlertTriangle, MessageCircle, CalendarDays, Wallet, Star, ScanLine, CircleDot, FileText, Wrench, Package, Droplets, BatteryCharging, Building2, Fuel, Zap, Plus,
+  Timer, ShieldAlert, AlertTriangle, MessageCircle, CalendarDays, Wallet, Star, ParkingSquare, Scale, ScanLine, CircleDot, FileText, Wrench, Package, Droplets, BatteryCharging, Building2, Fuel, Zap, Plus,
 } from "lucide-react";
 import { t } from "../lib/i18n.js";
 import {
-  useTheme, useUI, ACCENT, RED, AMBER, GREEN, BLUE, PURPLE, CYAN, GlowIcon, Ring, NotifRow, Stat, LiveStat, RowButton, PrimaryButton, SecondaryButton, NeonButton,
+  Section, ToolGrid, useAccentInk, useTheme, useUI, ACCENT, RED, AMBER, GREEN, BLUE, PURPLE, CYAN, GlowIcon, Ring, NotifRow, Stat, LiveStat, RowButton, PrimaryButton, SecondaryButton, NeonButton,
   carLabel, carFull, healthColor, toneColor, timeAgo, fmtDist, fmtSpeed, fmtTemp, fmtDuration,
 } from "../design.jsx";
 import { reminderState, markNotificationsRead } from "../lib/data.js";
 import { daysUntil, dateLabel } from "../lib/units.js";
 import { CarForm, ReminderForm, ServiceForm, OBDConnectSheet } from "./Garage.jsx";
-import { TodayCard, DailyTools, ScoreCard, WeeklyCard, SosButton, SosSheet } from "./Daily.jsx";
+import { TodayCard, WeeklyCard, SosButton, ScoreSheet, FuelPricesSheet, RoadAlertsSheet, ParkingSheet, FairPriceSheet } from "./Daily.jsx";
+import { streak, scoreColor, scoreWord } from "../lib/daily.js";
 
 export const PLACE_ICONS = {
   Mechanics: [Wrench, ACCENT], "Auto parts": [Package, BLUE], Tyres: [CircleDot, RED], Batteries: [BatteryCharging, PURPLE],
@@ -170,20 +171,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Quick actions */}
-      <div className="grid grid-cols-3 gap-3">
-        <QuickTile icon={connectedHere ? BluetoothConnected : Bluetooth} label={t("Adapter")} aria={connectedHere ? "Adapter connected, scan" : "Connect OBD-II adapter"}
-          status={connectedHere ? t("Connected") : obd.status === "connecting" ? "…" : t("Connect")} color={connectedHere ? GREEN : null} onClick={openAdapter} disabled={obd.status === "connecting"} />
-        <QuickTile icon={Navigation} label={t("Trip")} aria={tripLive ? "Open live trip" : "Start a trip"}
-          status={trip.status === "active" && trip.free ? `${fmtDist(trip.coveredKm, unit, 1)}` : trip.status === "active" ? `${fmtDist(Math.max(0, trip.totalKm - trip.coveredKm), unit, 0)} to go` : trip.status === "arrived" ? "Arrived" : trip.status === "locating" ? "…" : t("Start")} color={tripLive ? (mode === "light" ? "#6B7500" : ACCENT) : null} onClick={() => goTo("trip")} />
-        <QuickTile icon={Music2} label={t("Car Mode")} aria="Car Mode Radio" status={t("Radio & voice")} onClick={() => goTo("music")} />
-      </div>
-
-      <TodayCard />
-      <DailyTools />
-      <ScoreCard />
-      <WeeklyCard />
-
       {connectedHere && (
         <div className="rounded-3xl p-3.5" style={{ backgroundColor: "rgba(61,220,132,0.1)", border: `1px solid ${BORDER}` }}>
           <div className="flex items-center justify-between gap-2">
@@ -199,50 +186,66 @@ export default function Home() {
         </div>
       )}
 
-      <button onClick={() => goTo("ai", { ask: "__photo__" })} className="flex items-center gap-3 p-4 text-left active:scale-[0.98] transition-transform" style={{ borderRadius: 24, backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: CARD_ALT }}><Camera size={18} style={{ color: TEXT }} /></div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold" style={{ color: TEXT }}>{t("AI Vision Scan")}</p>
-          <p className="text-xs leading-snug" style={{ color: SUB }}>{t("Snap a warning light or damage — get a verdict")}</p>
+      <Section title="Quick actions">
+        <ToolGrid items={[
+          { icon: connectedHere ? BluetoothConnected : Bluetooth, label: t("Adapter"), color: BLUE, aria: connectedHere ? "Adapter connected, scan" : "Connect OBD-II adapter", status: connectedHere ? { text: t("Connected"), color: GREEN } : obd.status === "connecting" ? "…" : t("Connect"), onClick: openAdapter, disabled: obd.status === "connecting" },
+          { icon: Navigation, label: t("Trip"), color: ACCENT, aria: tripLive ? "Open live trip" : "Start a trip", status: trip.status === "active" && trip.free ? fmtDist(trip.coveredKm, unit, 1) : trip.status === "active" ? `${fmtDist(Math.max(0, trip.totalKm - trip.coveredKm), unit, 0)} to go` : trip.status === "arrived" ? "Arrived" : trip.status === "locating" ? "…" : t("Start"), onClick: () => goTo("trip") },
+          { icon: Music2, label: t("Car Mode"), color: PURPLE, aria: "Car Mode Radio", status: t("Radio & voice"), onClick: () => goTo("music") },
+          { icon: Camera, label: "AI scan", color: CYAN, aria: "AI Vision Scan", status: "Photo check", onClick: () => goTo("ai", { ask: "__photo__" }) },
+          { icon: Fuel, label: "Fuel prices", color: AMBER, onClick: () => openSheet("Fuel prices near you", <FuelPricesSheet />) },
+          { icon: AlertTriangle, label: "Road alerts", color: RED, onClick: () => openSheet("Road alerts near you", <RoadAlertsSheet />) },
+          { icon: ParkingSquare, label: "My parking", color: BLUE, onClick: () => openSheet("Where you parked", <ParkingSheet />) },
+          { icon: Scale, label: "Fair price?", color: GREEN, onClick: () => openSheet("Is this price fair?", <FairPriceSheet />) },
+        ]} />
+      </Section>
+
+      <Section title="Today"><TodayCard /></Section>
+
+      <Section title="Your driving">
+        <DrivingCard week={week} maxKm={maxKm} weekKm={weekKm} weekTrips={weekTrips} onTrips={openTrips} />
+        <WeeklyCard />
+      </Section>
+
+      <Section title="Find help nearby">
+        <div className="flex items-center gap-2">
+          <button onClick={() => goTo("market", { filter: "All" })} className="flex h-12 min-w-0 flex-1 items-center gap-2 rounded-full px-4 text-left active:scale-[0.98] transition-transform" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
+            <Search size={15} style={{ color: SUB }} className="shrink-0" />
+            <span className="truncate text-sm" style={{ color: SUB }}>{t("Search mechanics, parts, tyres...")}</span>
+          </button>
+          <button onClick={() => openSheet("Browse by category", <CategoryList />)} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full active:scale-95 transition-transform" style={{ backgroundColor: FILL }} aria-label="Browse categories">
+            <SlidersHorizontal size={17} style={{ color: FILL_TEXT }} />
+          </button>
         </div>
-        <span className="shrink-0 rounded-full px-3.5 py-2 text-xs font-semibold" style={{ backgroundColor: FILL, color: FILL_TEXT }}>{t("Open AI")}</span>
-      </button>
-
-      <div className="flex items-center gap-2">
-        <button onClick={() => goTo("market", { filter: "All" })} className="flex h-12 min-w-0 flex-1 items-center gap-2 rounded-full px-4 text-left active:scale-[0.98] transition-transform" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
-          <Search size={15} style={{ color: SUB }} className="shrink-0" />
-          <span className="truncate text-sm" style={{ color: SUB }}>{t("Search mechanics, parts, tyres...")}</span>
-        </button>
-        <button onClick={() => openSheet("Browse by category", <CategoryList />)} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full active:scale-95 transition-transform" style={{ backgroundColor: FILL }} aria-label="Browse categories">
-          <SlidersHorizontal size={17} style={{ color: FILL_TEXT }} />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <button onClick={openFuel} className="p-4 text-left active:scale-[0.97] transition-transform" style={{ borderRadius: 24, backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
-          <p style={{ fontSize: 11, color: SUB }}>{t("Fuel & battery")}</p>
-          <p className="mt-1 font-bold" style={{ fontSize: 24, color: TEXT }}>{fuelPct != null ? `${fuelPct}%` : "—"}</p>
-          <p className="mt-0.5 truncate" style={{ fontSize: 11, color: SUB }}>{fuelPct != null ? (fuelSource === "obd" ? "Live from adapter" : "From last scan") : "Connect OBD-II"}</p>
-          <p className="mt-2 truncate font-mono" style={{ fontSize: 11, color: battery == null ? SUB : battery < 12.2 ? RED : TEXT }}>{battery != null ? `${battery} V battery` : "Battery —"}</p>
-        </button>
-        <button onClick={openTrips} className="p-4 text-left active:scale-[0.97] transition-transform" style={{ borderRadius: 24, backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
-          <p style={{ fontSize: 11, color: SUB }}>{t("This week")}</p>
-          <p className="mt-1 font-bold" style={{ fontSize: 24, color: TEXT }}>{fmtDist(weekKm, unit, 0)}</p>
-          <p className="mt-0.5" style={{ fontSize: 11, color: SUB }}>{weekTrips.length} trip{weekTrips.length === 1 ? "" : "s"}{liveData ? ` · ${fmtDuration(liveData.runtimeSec)} engine` : ""}</p>
-          <div className="mt-2 flex h-6 items-end gap-1" aria-label={`Distance driven each day this week, ${fmtDist(weekKm, unit)} in total`}>
-            {week.map((d, i) => <div key={i} className="flex-1 rounded-full" style={{ height: `${Math.max(3, (d.km / maxKm) * 22)}px`, backgroundColor: i === 6 ? FILL : BORDER }} />)}
-          </div>
-        </button>
-      </div>
-
-      <div className="relative flex items-center gap-2.5">
-        {dueCount > 0 && <span className="absolute -left-1 -top-2 z-10 flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-bold" style={{ fontSize: 9, backgroundColor: FILL, color: FILL_TEXT }} aria-label={`${dueCount} service items due`}>{dueCount}</span>}
-        <button onClick={() => goTo("market", { filter: "Service centres" })} className="flex-1 rounded-2xl py-3 text-center active:scale-95 transition-transform" style={{ fontSize: 12, backgroundColor: CARD, border: `1px solid ${BORDER}`, color: TEXT }}>{t("Service centres")}</button>
-        <button onClick={() => goTo("market", { filter: "Mechanics" })} className="flex-1 rounded-2xl py-3 text-center font-semibold active:scale-95 transition-transform" style={{ fontSize: 12, backgroundColor: FILL, color: FILL_TEXT }}>{t("Mechanics near me")}</button>
-      </div>
+      </Section>
     </div>
   );
 }
+
+// Your driving: this week's distance by day, and the driving score with its streak.
+function DrivingCard({ week, maxKm, weekKm, weekTrips, onTrips }) {
+  const { unit, trips, openSheet } = useUI();
+  const { CARD, BORDER, TEXT, SUB, RING_TRACK } = useTheme();
+  const ink = useAccentInk();
+  const scored = weekTrips.filter((x) => x.score != null);
+  const avg = scored.length ? Math.round(scored.reduce((s, x) => s + x.score, 0) / scored.length) : null;
+  const st = streak(trips);
+  return (
+    <button onClick={() => (trips.some((x) => x.score != null) ? openSheet("Your driving", <ScoreSheet />) : onTrips())} aria-label="Driving score and this week" className="flex items-center gap-4 p-4 text-left active:scale-[0.98] transition-transform" style={{ borderRadius: 24, backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
+      <div className="relative flex shrink-0 items-center justify-center">
+        <Ring pct={avg ?? 0} color={scoreColor(avg) || RING_TRACK} track={RING_TRACK} size={60} stroke={5} />
+        <span className="absolute text-base font-bold" style={{ color: TEXT }}>{avg ?? "—"}</span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold" style={{ color: TEXT }}>{avg != null ? `Driving score · ${scoreWord(avg)}` : "Driving score"}</p>
+        <p className="mt-0.5 text-xs" style={{ color: SUB }}>{fmtDist(weekKm, unit, 0)} this week · {weekTrips.length} trip{weekTrips.length === 1 ? "" : "s"}{st ? ` · 🔥 ${st}-day streak` : ""}</p>
+        <div className="mt-2 flex h-6 items-end gap-1" aria-label={`Distance driven each day this week, ${fmtDist(weekKm, unit)} in total`}>
+          {week.map((d, i) => <div key={i} className="flex-1 rounded-full" style={{ height: `${Math.max(3, (d.km / maxKm) * 22)}px`, backgroundColor: i === 6 ? ink : BORDER }} />)}
+        </div>
+      </div>
+    </button>
+  );
+}
+
 
 function QuickTile({ icon: Icon, label, status, color, onClick, aria, disabled }) {
   const { CARD, CARD_ALT, TEXT, SUB, BORDER } = useTheme();

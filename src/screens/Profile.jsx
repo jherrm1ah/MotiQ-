@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { Globe, Wallet, User, Sun, Moon, Gauge, Bell, Music2, FileText, Shield, HelpCircle, ChevronRight, LogOut, Mail, Plus, Trash2, ShieldCheck, Loader2, Car } from "lucide-react";
 import { t } from "../lib/i18n.js";
-import { useTheme, useUI, RED, AMBER, GREEN, ACCENT, Field, Pill, PrimaryButton, SecondaryButton, ToggleRow, Stat, TrackThumb, Logo, carLabel } from "../design.jsx";
+import { MenuGroup, BLUE, PURPLE, CYAN, useTheme, useUI, RED, AMBER, GREEN, ACCENT, Field, Pill, PrimaryButton, SecondaryButton, ToggleRow, Stat, TrackThumb, Logo, carLabel } from "../design.jsx";
 import { saveProfile, clearAiHistory, addDocument, deleteDocument, unblockUser } from "../lib/data.js";
 import { LanguagePicker, ExpensesSheet, ProCard, FleetSheet } from "./ProfileExtras.jsx";
 import { CountryPapersSheet, BackgroundTripsSheet, ShareCardsSheet } from "./Growth.jsx";
@@ -259,26 +259,39 @@ export default function Profile() {
   const theme = useTheme();
   const { CARD, TEXT, SUB, BORDER, FILL } = theme;
   const since = me.created_at ? new Date(me.created_at).toLocaleDateString(undefined, { month: "short", year: "2-digit" }).replace(" ", " '") : "—";
-  const items = [
-    ["Account details", User, () => <ProfileForm onSaved={closeSheet} />],
-    ["Appearance", theme.mode === "dark" ? Moon : Sun, () => <AppearancePicker />],
-    ["Units", Gauge, () => <UnitsPicker />],
-    ["Notifications", Bell, () => <AlertsPicker />],
-    ["Language", Globe, () => <LanguagePicker />],
-    ["Costs & expenses", Wallet, () => <ExpensesSheet />],
-    ["Your week", CalendarDays, () => <WeeklySheet />],
-    ["Driver earnings (Uber, Bolt…)", Briefcase, () => <DriverModeSheet />],
-    ["Invite friends", Gift, () => <InviteSheet />],
-    ["Fleet dashboard", Truck, () => <FleetSheet />],
-    ["Background trips (car Bluetooth)", Bluetooth, () => <BackgroundTripsSheet />],
-    ["Share a card", ImageIcon, () => <ShareCardsSheet />],
-    ["Car papers for my country", FileText, () => <CountryPapersSheet />],
-    ["Music & media", Music2, () => <MusicInfo />],
-    ["Documents & warranty", FileText, () => <DocumentsSheet />],
-    ["Privacy & security", Shield, () => <PrivacySheet />],
-    ["Help & support", HelpCircle, () => <HelpSheet />],
+  // Settings in named groups, each item with its own accent colour.
+  const open = (label, body) => () => openSheet(t(label), body());
+  const item = (label, icon, color, body) => ({ label: t(label), icon, color, onClick: open(label, body) });
+  const groups = [
+    ["Account", [
+      item("Account details", User, BLUE, () => <ProfileForm onSaved={closeSheet} />),
+      item("Appearance", theme.mode === "dark" ? Moon : Sun, PURPLE, () => <AppearancePicker />),
+      item("Units", Gauge, CYAN, () => <UnitsPicker />),
+      item("Language", Globe, GREEN, () => <LanguagePicker />),
+      item("Notifications", Bell, AMBER, () => <AlertsPicker />),
+    ]],
+    ["Money", [
+      item("Costs & expenses", Wallet, GREEN, () => <ExpensesSheet />),
+      item("Your week", CalendarDays, BLUE, () => <WeeklySheet />),
+      item("Driver earnings (Uber, Bolt…)", Briefcase, AMBER, () => <DriverModeSheet />),
+      item("Fleet dashboard", Truck, PURPLE, () => <FleetSheet />),
+    ]],
+    ["Car & trips", [
+      item("Documents & warranty", FileText, CYAN, () => <DocumentsSheet />),
+      item("Car papers for my country", FileText, BLUE, () => <CountryPapersSheet />),
+      item("Background trips (car Bluetooth)", Bluetooth, ACCENT, () => <BackgroundTripsSheet />),
+      item("Music & media", Music2, PURPLE, () => <MusicInfo />),
+    ]],
+    ["Share", [
+      item("Invite friends", Gift, ACCENT, () => <InviteSheet />),
+      item("Share a card", ImageIcon, RED, () => <ShareCardsSheet />),
+    ]],
+    ["Help & privacy", [
+      item("Privacy & security", Shield, GREEN, () => <PrivacySheet />),
+      item("Help & support", HelpCircle, BLUE, () => <HelpSheet />),
+      me.is_admin && { label: "Admin", icon: ShieldCheck, color: RED, onClick: () => goTo("admin") },
+    ]],
   ];
-  if (me.is_admin) items.push(["Admin", ShieldCheck, null]);
   return (
     <div className="flex flex-col gap-6 px-5 pt-2" style={{ paddingBottom: 120 }}>
       <div className="flex flex-col items-center gap-3 pt-4 text-center">
@@ -298,13 +311,7 @@ export default function Profile() {
         ))}
       </div>
       <ProCard />
-      <div style={{ borderRadius: 24, backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
-        {items.map(([label, Icon, body], i) => (
-          <button key={label} onClick={() => (body ? openSheet(t(label), body()) : goTo("admin"))} className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors" style={i !== items.length - 1 ? { borderBottom: `1px solid ${BORDER}` } : {}}>
-            <Icon size={16} style={{ color: SUB }} /><span className="flex-1 text-sm" style={{ color: TEXT }}>{t(label)}</span><ChevronRight size={15} style={{ color: SUB }} />
-          </button>
-        ))}
-      </div>
+      {groups.map(([title, rows]) => <MenuGroup key={title} title={title} items={rows} />)}
       <button onClick={() => confirm("Sign out?", "You'll need to sign back in to see your garage and history.", "Sign out", signOut)} className="flex items-center justify-center gap-2 py-4 text-sm font-medium active:scale-95 transition-transform" style={{ borderRadius: 24, backgroundColor: CARD, border: `1px solid ${BORDER}`, color: RED }}>
         <LogOut size={15} /> {t("Sign out")}
       </button>
