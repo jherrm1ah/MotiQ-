@@ -1,8 +1,8 @@
 // Profile extras: language, the costs & expenses report, and Motiq Pro.
 import React, { useMemo, useState } from "react";
 import { Check, Crown, Download, Loader2, Sparkles } from "lucide-react";
-import { useTheme, useUI, ACCENT, GREEN, Pill, PrimaryButton, NeonButton, carLabel } from "../design.jsx";
-import { saveProfile, isPro, startProCheckout } from "../lib/data.js";
+import { useTheme, useUI, ACCENT, GREEN, Pill, PrimaryButton, SecondaryButton, NeonButton, carLabel } from "../design.jsx";
+import { saveProfile, isPro, isFleet, startProCheckout, loadFleetTrips } from "../lib/data.js";
 import { LANGUAGES, TRANSLATED, setLanguage } from "../lib/i18n.js";
 import { money, dateLabel } from "../lib/units.js";
 
@@ -95,18 +95,22 @@ export function ExpensesSheet() {
 }
 
 const PRICES = { NGN: { 1: 2500, 12: 25000 }, GHS: { 1: 30, 12: 300 }, KES: { 1: 400, 12: 4000 }, ZAR: { 1: 55, 12: 550 }, USD: { 1: 3, 12: 30 } };
-export const PRO_PERKS = ["Unlimited cars (free: 2)", "100 AI mechanic questions a day (free: 15)", "Share your car's history as a PDF", "Priority for new features"];
+const FLEET_PRICES = { NGN: { 1: 15000, 12: 150000 }, GHS: { 1: 180, 12: 1800 }, KES: { 1: 2400, 12: 24000 }, ZAR: { 1: 330, 12: 3300 }, USD: { 1: 18, 12: 180 } };
+export const PRO_PERKS = ["Up to 10 cars (free: 2)", "100 AI mechanic questions a day (free: 15)", "Share your car's history as a PDF", "Priority for new features"];
+const FLEET_PERKS = ["Up to 50 cars, shared with your drivers", "Fleet dashboard: distance, costs and driving score per car and driver", "Everything in Pro"];
 
-export function UpgradeSheet() {
+export function UpgradeSheet({ initialPlan = "pro" }) {
   const { me, showToast } = useUI();
   const { TEXT, SUB, CARD_ALT, BORDER, FILL } = useTheme();
   const currency = PRICES[me.currency] ? me.currency : "USD";
   const [months, setMonths] = useState(12);
+  const [plan, setPlan] = useState(initialPlan);
+  const table = plan === "fleet" ? FLEET_PRICES : PRICES;
   const [busy, setBusy] = useState(false);
   const pay = async () => {
     setBusy(true);
     try {
-      const { url } = await startProCheckout(months);
+      const { url } = await startProCheckout(months, plan);
       const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
       if (native) { const { Browser } = await import("@capacitor/browser"); await Browser.open({ url }); }
       else window.location.href = url;
@@ -115,18 +119,19 @@ export function UpgradeSheet() {
   };
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex gap-2">{[["pro", "Pro"], ["fleet", "Fleet (business)"]].map(([k, l]) => <Pill key={k} small active={plan === k} onClick={() => setPlan(k)}>{l}</Pill>)}</div>
       <div className="flex flex-col gap-2">
-        {PRO_PERKS.map((p) => <p key={p} className="flex items-center gap-2 text-sm" style={{ color: TEXT }}><Check size={15} style={{ color: GREEN }} /> {p}</p>)}
+        {(plan === "fleet" ? FLEET_PERKS : PRO_PERKS).map((p) => <p key={p} className="flex items-center gap-2 text-sm" style={{ color: TEXT }}><Check size={15} style={{ color: GREEN }} /> {p}</p>)}
       </div>
       <div className="grid grid-cols-2 gap-3">
         {[[1, "Monthly"], [12, "Yearly"]].map(([m, label]) => (
           <button key={m} onClick={() => setMonths(m)} aria-pressed={months === m} className="flex flex-col items-start gap-0.5 rounded-2xl p-4 text-left" style={{ backgroundColor: CARD_ALT, border: `2px solid ${months === m ? FILL : BORDER}` }}>
             <span className="text-xs" style={{ color: SUB }}>{label}{m === 12 ? " · 2 months free" : ""}</span>
-            <span className="text-lg font-bold" style={{ color: TEXT }}>{money(PRICES[currency][m], currency)}</span>
+            <span className="text-lg font-bold" style={{ color: TEXT }}>{money(table[currency][m], currency)}</span>
           </button>
         ))}
       </div>
-      <NeonButton onClick={pay} disabled={busy} className="rounded-2xl py-4 text-sm">{busy ? <Loader2 size={15} className="animate-spin" /> : <Crown size={15} />} Get Motiq Pro</NeonButton>
+      <NeonButton onClick={pay} disabled={busy} className="rounded-2xl py-4 text-sm">{busy ? <Loader2 size={15} className="animate-spin" /> : <Crown size={15} />} {plan === "fleet" ? "Get Motiq Fleet" : "Get Motiq Pro"}</NeonButton>
       <p className="text-[11px] leading-relaxed" style={{ color: SUB }}>Paid securely with Paystack (card, bank or mobile money). Pro starts as soon as the payment goes through. It doesn't renew by itself.</p>
     </div>
   );
@@ -140,10 +145,61 @@ export function ProCard() {
     <button onClick={() => !pro && openSheet("Motiq Pro", <UpgradeSheet />)} className="flex items-center gap-3 p-4 text-left active:scale-[0.98] transition-transform" style={{ borderRadius: 24, backgroundColor: pro ? "rgba(239,255,0,0.1)" : CARD, border: `1px solid ${pro ? "rgba(239,255,0,0.4)" : BORDER}` }}>
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: ACCENT }}><Crown size={17} color="#000" /></div>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold" style={{ color: TEXT }}>{pro ? "Motiq Pro" : "Upgrade to Motiq Pro"}</p>
+        <p className="text-sm font-semibold" style={{ color: TEXT }}>{isFleet(me) ? "Motiq Fleet" : pro ? "Motiq Pro" : "Upgrade to Motiq Pro"}</p>
         <p className="text-xs" style={{ color: SUB }}>{pro ? (me.pro_until ? `Active until ${dateLabel(me.pro_until)}` : "Active") : "More cars, more AI, history PDF"}</p>
       </div>
       {!pro && <Sparkles size={16} style={{ color: SUB }} />}
     </button>
+  );
+}
+
+// Fleet dashboard: every car you own, who drove it, how far, how well and what it cost.
+export function FleetSheet() {
+  const { me, uid, vehicles, garage, fuel, openSheet } = useUI();
+  const { TEXT, SUB, CARD_ALT, BORDER } = useTheme();
+  const owned = vehicles.filter((v) => v.owner_id === uid);
+  const [trips, setTrips] = useState(null);
+  const [days, setDays] = useState(30);
+  React.useEffect(() => { loadFleetTrips(owned.map((v) => v.id)).then(setTrips).catch(() => setTrips([])); }, []);
+  if (!isFleet(me)) return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm leading-relaxed" style={{ color: SUB }}>Run taxis, deliveries or company cars? The Fleet plan shows every car and driver in one place: distance, fuel and repair costs, and each driver's score.</p>
+      <UpgradeSheet initialPlan="fleet" />
+    </div>
+  );
+  if (!trips) return <Loader2 size={18} className="animate-spin" style={{ color: SUB }} />;
+  const since = Date.now() - days * 86400000;
+  const inRange = (iso) => new Date(iso).getTime() >= since;
+  const rows = owned.map((v) => {
+    const t = trips.filter((x) => x.vehicle_id === v.id && inRange(x.ended_at));
+    const scored = t.filter((x) => x.score != null);
+    const cost = [...garage.services.filter((s) => s.vehicle_id === v.id && s.cost != null && s.currency === me.currency && inRange(s.done_on)), ...fuel.filter((f) => f.vehicle_id === v.id && f.cost != null && f.currency === me.currency && inRange(f.filled_on))].reduce((a, x) => a + Number(x.cost), 0);
+    return { v, km: t.reduce((a, x) => a + Number(x.distance_km || 0), 0), trips: t.length, score: scored.length ? Math.round(scored.reduce((a, x) => a + x.score, 0) / scored.length) : null, cost };
+  });
+  const drivers = Object.values(trips.filter((x) => inRange(x.ended_at)).reduce((m, x) => { const k = x.owner_id; m[k] = m[k] || { name: (x.driver && x.driver.name) || "Driver", km: 0, n: 0, sum: 0, scored: 0 }; m[k].km += Number(x.distance_km || 0); m[k].n++; if (x.score != null) { m[k].sum += x.score; m[k].scored++; } return m; }, {}));
+  const total = rows.reduce((a, r) => ({ km: a.km + r.km, cost: a.cost + r.cost }), { km: 0, cost: 0 });
+  const exportCsv = () => {
+    const csv = ["Car,Trips,Distance (km),Avg score,Costs," + me.currency, ...rows.map((r) => [carLabel(r.v), r.trips, r.km.toFixed(1), r.score ?? "", r.cost.toFixed(2)].map((x) => `"${String(x).replace(/"/g, '""')}"`).join(","))].join("\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" })); a.download = `motiq-fleet-${days}d.csv`; document.body.appendChild(a); a.click(); a.remove();
+  };
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex gap-2">{[[7, "7 days"], [30, "30 days"], [90, "90 days"]].map(([d, l]) => <Pill key={d} small active={days === d} onClick={() => setDays(d)}>{l}</Pill>)}</div>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        {[["Cars", owned.length], ["Distance", `${Math.round(total.km).toLocaleString()} km`], ["Costs", money(total.cost, me.currency)]].map(([l, v]) => <div key={l} className="rounded-2xl p-3" style={{ backgroundColor: CARD_ALT }}><p className="text-sm font-bold" style={{ color: TEXT }}>{v}</p><p className="text-[10px]" style={{ color: SUB }}>{l}</p></div>)}
+      </div>
+      <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: SUB }}>Cars</p>
+      {rows.map((r) => (
+        <div key={r.v.id} className="flex items-center justify-between gap-2 py-1.5" style={{ borderBottom: `1px solid ${BORDER}` }}>
+          <div className="min-w-0"><p className="truncate text-sm font-medium" style={{ color: TEXT }}>{carLabel(r.v)}</p><p className="text-[11px]" style={{ color: SUB }}>{r.trips} trips · {Math.round(r.km)} km{r.score != null ? ` · score ${r.score}` : ""}</p></div>
+          <span className="font-mono text-sm" style={{ color: TEXT }}>{money(r.cost, me.currency)}</span>
+        </div>
+      ))}
+      <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: SUB }}>Drivers</p>
+      {drivers.length === 0 ? <p className="text-sm" style={{ color: SUB }}>No trips yet. Share a car with a driver (Garage → Share this car) and their trips in it show here.</p> : drivers.sort((a, b) => b.km - a.km).map((d) => (
+        <div key={d.name} className="flex items-center justify-between text-sm"><span style={{ color: TEXT }}>{d.name}</span><span className="text-[11px]" style={{ color: SUB }}>{d.n} trips · {Math.round(d.km)} km{d.scored ? ` · score ${Math.round(d.sum / d.scored)}` : ""}</span></div>
+      ))}
+      <SecondaryButton onClick={exportCsv}><Download size={14} /> Export fleet report (CSV)</SecondaryButton>
+    </div>
   );
 }

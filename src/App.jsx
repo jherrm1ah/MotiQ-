@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { supabase } from "./lib/supabase.js";
-import { loadProfile, loadGarage, loadDocuments, loadTrips, loadFuel, loadBlocks, saveTrip, healthOf, reminderState, loadEarnings, loadRoadAlerts, ROAD_ALERTS } from "./lib/data.js";
+import { loadProfile, loadGarage, loadDocuments, loadTrips, loadFuel, loadBlocks, saveTrip, healthOf, reminderState, loadEarnings, loadRoadAlerts, ROAD_ALERTS, loadNotifications, watchNotifications, savePushToken, track } from "./lib/data.js";
 import { tripScore, SPEEDING_KMH } from "./lib/daily.js";
 import { syncReminders } from "./lib/notify.js";
 import { connectAdapter, readLive } from "./lib/obd.js";
@@ -63,6 +63,7 @@ function Motiq() {
   const [loadError, setLoadError] = useState("");
   const [active, setActive] = useState(() => new URLSearchParams(window.location.search).get("tab") || "home");
   const [marketFilter, setMarketFilter] = useState(null);
+  const [marketView, setMarketView] = useState(null);
   const [aiPrompt, setAiPrompt] = useState(null);
   const [sheet, setSheet] = useState(null);
   const [toast, setToast] = useState(null);
@@ -106,6 +107,7 @@ function Motiq() {
   useEffect(() => {
     if (!uid) return;
     const check = (n) => loadProfile(uid).then((p) => { if (!p) return; if (p.plan === "pro") { setMe(p); showToast("Welcome to Motiq Pro"); } else if (n > 0) setTimeout(() => check(n - 1), 3000); }).catch(() => {});
+    if (/[?&]job=paid/.test(window.location.search)) { window.history.replaceState(null, "", window.location.pathname); showToast("Payment received — Motiq holds it until the job is done"); goTo("market", { view: "quotes" }); }
     if (/[?&]pro=done/.test(window.location.search)) { window.history.replaceState(null, "", window.location.pathname); check(5); }
     let sub;
     if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
@@ -151,6 +153,7 @@ function Motiq() {
   const scrollRef = useRef(null);
   const goTo = useCallback((tab, opts = {}) => {
     if (opts.filter !== undefined) setMarketFilter(opts.filter);
+    setMarketView(opts.view || null);
     if (opts.ask) setAiPrompt(opts.ask);
     setSheet(null);
     setActive(tab);
@@ -204,13 +207,65 @@ function Motiq() {
   }
   useEffect(() => () => { liveRun.current++; if (linkRef.current) linkRef.current.close(); }, []);
 
+  // ---- Notifications: the bell inbox (live) and push to the phone.
+  const [inbox, setInbox] = useState([]);
+  useEffect(() => {
+    if (!uid) return;
+    loadNotifications(uid).then(setInbox).catch(() => {});
+    return watchNotifications(uid, (n) => { setInbox((x) => [n, ...x.filter((y) => y.id !== n.id)]); showToast(n.title); });
+  }, [uid]);
+  const linkTo = useCallback((link) => {
+    if (link === "quotes") goTo("market", { view: "quotes" });
+    else if (link === "inbox") goTo("market", { view: "inbox" });
+    else if (link) goTo(link);
+  }, [goTo]);
+  useEffect(() => {
+    if (!uid || !(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())) return;
+    let subs = [];
+    (async () => {
+      try {
+        const W = window.Capacitor.Plugins && window.Capacitor.Plugins.MotiqWidget;
+        const ok = W && W.pushReady ? (await W.pushReady()).ready : false;
+        if (!ok) return; // this build has no Firebase setup yet: skip push, everything else works
+        const { PushNotifications } = await import("@capacitor/push-notifications");
+        subs.push(await PushNotifications.addListener("registration", (t) => savePushToken(uid, t.value).catch(() => {})));
+        subs.push(await PushNotifications.addListener("pushNotificationActionPerformed", (a) => linkTo(a.notification && a.notification.data && a.notification.data.link)));
+        await PushNotifications.createChannel({ id: "motiq", name: "Motiq", description: "Quotes, messages, bookings and payments", importance: 4 }).catch(() => {});
+        const perm = await PushNotifications.requestPermissions();
+        if (perm.receive === "granted") await PushNotifications.register();
+      } catch (e) { /* push needs the Firebase setup; everything else works without it */ }
+    })();
+    return () => subs.forEach((x) => x.remove());
+  }, [uid]);
+  useEffect(() => { if (uid && active) track(`open_${active}`); }, [uid, active]);
+  // Trips the Android app recorded in the background (car Bluetooth) are saved when Motiq opens.
+  useEffect(() => {
+    const P = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.MotiqTrips;
+    if (!uid || !P) return;
+    P.takePending().then(async ({ trips: fresh }) => {
+      const list = [...local.get("motiq.pendingTrips", []), ...(fresh || [])];
+      const failed = [];
+      let saved = 0;
+      for (const t of list) {
+        const sc = tripScore({ elapsedSec: t.duration_sec, hardBrakes: t.hard_brakes, speedingSec: t.speeding_sec });
+        try {
+          const row = await saveTrip(uid, { vehicle_id: t.vehicle_id || null, origin: "Background trip", destination: new Date(t.started_at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }), distance_km: t.distance_km, duration_sec: t.duration_sec, alerts: t.hard_brakes, real_route: false, completed: true, ...sc, night: !!t.night });
+          setTrips((prev) => [row, ...prev]); saved++;
+        } catch (e) { failed.push(t); } // offline or not set up yet: try again next time
+      }
+      local.set("motiq.pendingTrips", failed.slice(-50));
+      if (saved) showToast(`${saved} trip${saved === 1 ? "" : "s"} recorded in the background`);
+    }).catch(() => {});
+  }, [uid]);
+
   // Android home-screen widget: com.orynthra.motiq://open/trip (or /home, /garage...).
   useEffect(() => {
     if (!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())) return;
     let h;
     const handle = (url) => {
       const m = /^com\.orynthra\.motiq:\/\/open\/([a-z]+)/.exec(url || "");
-      if (m && ["home", "trip", "garage", "nearby", "ai", "sos", "dash"].includes(m[1])) goTo(m[1] === "sos" ? "home" : m[1]);
+      if (m && m[1] === "nearby") m[1] = "market";
+      if (m && ["home", "trip", "garage", "market", "ai", "sos", "dash"].includes(m[1])) goTo(m[1] === "sos" ? "home" : m[1]);
       if (m && m[1] === "sos") setSosRequest(Date.now());
     };
     import("@capacitor/app").then(async ({ App: CapApp }) => {
@@ -403,7 +458,7 @@ function Motiq() {
 
   const ui = {
     me, setMe, uid, email: session && session.user ? session.user.email : "", unit, garage, vehicles, vehicle, setCarId, documents, setDocuments, trips, setTrips, fuel, setFuel, blocks, setBlocks, online, reload, prefs, setPrefs,
-    goTo, active, marketFilter, aiPrompt, clearAiPrompt: () => setAiPrompt(null), openSheet, closeSheet, confirm, showToast, signOut,
+    goTo, active, marketFilter, marketView, inbox, setInbox, linkTo, aiPrompt, clearAiPrompt: () => setAiPrompt(null), openSheet, closeSheet, confirm, showToast, signOut,
     obd, liveData, connectOBD, disconnectOBD, getLink: () => linkRef.current,
     trip, setTrip, startTrip, endTrip, dismissTrip, voiceAlerts, setVoiceAlerts, parking, setParking, sosRequest, setSosRequest, roadAlerts, setRoadAlerts, earnings, setEarnings,
     browseList, setBrowseList, current, isPlaying, carMode, setCarMode, queue, favorites, recentlyPlayed,

@@ -2,7 +2,7 @@
 // history, documents, the OBD-II adapter and editing. The forms here are reused from Home.
 import React, { useState } from "react";
 import {
-  Plus, ChevronDown, ChevronRight, Car, Bluetooth, BluetoothConnected, Trash2, Check, AlertTriangle, Wrench, Bot, Pencil, Gauge, ScanLine, FileText, Loader2, Fuel, ShieldAlert, Share2, Camera, Search, Users, UserPlus, LogOut, Copy,
+  Plus, ChevronDown, ChevronRight, Car, Bluetooth, BluetoothConnected, Trash2, Check, AlertTriangle, Wrench, Bot, Pencil, Gauge, ScanLine, FileText, Loader2, Fuel, ShieldAlert, Share2, Camera, Search, Users, UserPlus, LogOut, Copy, BadgeDollarSign,
 } from "lucide-react";
 import { t } from "../lib/i18n.js";
 import {
@@ -17,6 +17,29 @@ import { decodeVin, readVinFromPhoto } from "../lib/data.js";
 import { FuelSheet, RecallsSheet, shareHistory } from "./CarTools.jsx";
 import { createInvite, redeemInvite, loadMembers, removeMember, isPro } from "../lib/data.js";
 import { UpgradeSheet } from "./ProfileExtras.jsx";
+import { ListingForm } from "./Nearby.jsx";
+
+// Sell this car: an AI price estimate from its history, then a market listing filled in from
+// the car's details and service record.
+function SellCarSheet({ car }) {
+  const { me, garage, unit, goTo, closeSheet, openSheet, showToast } = useUI();
+  const { TEXT, SUB, CARD_ALT } = useTheme();
+  const services = garage.services.filter((s) => s.vehicle_id === car.id);
+  const description = [
+    `${carFull(car)}${car.trim_level ? ` ${car.trim_level}` : ""}, ${(car.odometer || 0).toLocaleString()} ${unit}, ${car.fuel}, ${car.transmission}.`,
+    services.length ? `Service history in Motiq: ${services.length} record${services.length === 1 ? "" : "s"} — ${services.slice(0, 5).map((s) => `${s.title} (${s.done_on})`).join(", ")}.` : "",
+    car.health != null ? `Motiq health score: ${car.health}/100.` : "",
+  ].filter(Boolean).join("\n");
+  const list = () => openSheet("Sell your car", <ListingForm l={{ kind: "car", title: carFull(car), description, currency: me.currency, country: me.country, city: me.city, condition: "used", photos: [] }} onSaved={() => { closeSheet(); showToast("Your car is listed in the market"); goTo("market", { view: "mine" }); }} />);
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm leading-relaxed" style={{ color: SUB }}>A complete service history helps your car sell faster and for more. {services.length ? `You have ${services.length} service record${services.length === 1 ? "" : "s"} — buyers will see them.` : "Log past services before you sell — buyers pay more for a car with a record."}</p>
+      <SecondaryButton onClick={() => { closeSheet(); goTo("ai", { ask: "__value__" }); }}><Bot size={14} /> What's my car worth? (AI estimate)</SecondaryButton>
+      <PrimaryButton onClick={list}><BadgeDollarSign size={15} /> List it for sale</PrimaryButton>
+      <div className="rounded-2xl p-3 text-xs leading-relaxed whitespace-pre-line" style={{ backgroundColor: CARD_ALT, color: TEXT }}>{description}</div>
+    </div>
+  );
+}
 
 // Owner: make an invite code and see / remove who the car is shared with.
 function ShareCarSheet({ car }) {
@@ -318,6 +341,7 @@ export default function Garage() {
                     <SmallButton icon={Fuel} label="Fuel log" onClick={() => openSheet(`Fuel log — ${carLabel(v)}`, <FuelSheet car={v} />)} />
                     <SmallButton icon={ShieldAlert} label="Recalls & issues" onClick={() => openSheet(`Recalls & known problems`, <RecallsSheet car={v} />)} />
                   </div>
+                  {!shared && <SmallButton icon={BadgeDollarSign} label="What's it worth? · Sell this car" onClick={() => openSheet("Sell this car", <SellCarSheet car={v} />)} />}
                   <SmallButton icon={Share2} label="Share car history (PDF)" onClick={async () => { if (!isPro(me)) { openSheet("Motiq Pro", <UpgradeSheet />); return; } try { const r = await shareHistory({ car: v, garage, documents, fuel, me, unit }); if (r === "downloaded") showToast("History PDF downloaded"); } catch (e) { showToast(e.message || "Couldn't make the PDF"); } }} />
 
                   {services.length > 0 && (

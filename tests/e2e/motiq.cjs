@@ -24,12 +24,21 @@ async function fakes(p, db, calls) {
       const mode = b.mode === "scan" ? "chat" : b.mode;
       db.ai_messages.push({ id: uuid(), owner_id: ME, vehicle_id: b.vehicleId, mode, role: "user", content: b.message, created_at: now() });
       const reply = b.mode === "scan" ? "[VERDICT:caution]\n**P0171** means the engine is running lean.\n- Check for a vacuum leak\n- Clean the MAF sensor"
+        : b.mode === "value" ? "**Private sale:** about ₦6.5m – ₦7.2m. A full service history helps."
         : b.mode === "voice" ? "Your car is mostly fine, but your last scan found a lean fuel mixture. Get it checked this week."
           : "[VERDICT:caution]\nThat squeal is usually the brake wear indicator. Get the pads checked soon.";
       db.ai_messages.push({ id: uuid(), owner_id: ME, vehicle_id: b.vehicleId, mode, role: "assistant", content: reply, created_at: now() });
       return json(route, { reply });
     }
     if (path.includes("/storage/v1/object/")) return json(route, { Key: "x" });
+    if (path.endsWith("/functions/v1/paystack-init") && /"kind":"job"/.test(req.postData() || "")) { // the driver pays a mechanic; Motiq holds it
+      const o = db.quote_offers.find((x) => x.id === JSON.parse(req.postData()).offerId);
+      db.job_payments.push({ id: uuid(), offer_id: o.id, driver_id: ME, provider_id: o.provider_id, reference: "job_test", amount: o.price, commission: o.price * 0.1, currency: o.currency, status: "held", created_at: now() });
+      return json(route, { url: "http://localhost:4322/?job=paid", reference: "job_test", amount: o.price, currency: o.currency });
+    }
+    if (path.endsWith("/rest/v1/rpc/release_job_payment")) { const id = JSON.parse(req.postData()).p_payment; db.job_payments.find((x) => x.id === id).status = "released"; return json(route, null); }
+    if (path.endsWith("/rest/v1/rpc/mechanic_rating")) return json(route, { count: 3, avg: 4.7 });
+    if (path.endsWith("/rest/v1/rpc/admin_usage")) return json(route, { active: 42, events: [{ event: "open_home", uses: 120, users: 40 }, { event: "ai_light", uses: 9, users: 7 }], daily: [{ day: "2026-11-10", users: 20 }, { day: "2026-11-11", users: 30 }], funnel: { signed_up: 10, added_car: 7, asked_ai: 5, came_back: 4 } });
     if (path.endsWith("/functions/v1/paystack-init")) { // pretend the payment went through and Paystack sent the driver back
       Object.assign(db.profiles[0], { plan: "pro", pro_until: new Date(Date.now() + 365 * 86400000).toISOString() });
       return json(route, { url: "http://localhost:4322/?pro=done", reference: "mq_test", amount: 25000, currency: "NGN" });
@@ -88,7 +97,8 @@ async function fakes(p, db, calls) {
   const errs = [];
   const db = {
     profiles: [{ id: ME, name: "Ada Obi", country: "", currency: "USD", distance_unit: "km", city: "", phone: "", plan: "free", is_admin: true, language: "en", created_at: "2026-03-02T10:00:00Z" }],
-    vehicles: [], service_records: [], reminders: [], scans: [], ai_messages: [], conversations: [], messages: [], vehicle_documents: [], trips: [], fuel_logs: [], listing_reports: [], user_blocks: [], vehicle_invites: [], vehicle_members: [], fuel_prices: [], road_alerts: [], driver_earnings: [], referrals: [], quote_requests: [], quote_offers: [], client_errors: [], payments: [],
+    vehicles: [], service_records: [], reminders: [], scans: [], ai_messages: [], conversations: [], messages: [], vehicle_documents: [], trips: [], fuel_logs: [], listing_reports: [], user_blocks: [], vehicle_invites: [], vehicle_members: [], fuel_prices: [], road_alerts: [], driver_earnings: [], referrals: [], bookings: [], job_payments: [], mechanic_reviews: [], profile_private: [], usage_events: [], push_tokens: [],
+    notifications: [{ id: "n-1", user_id: ME, kind: "system", title: "Welcome to Motiq 1.5", body: "Book mechanics and pay them safely through Motiq.", link: "", read_at: null, created_at: now() }], quote_requests: [], quote_offers: [], client_errors: [], payments: [],
     listings: [{ id: uuid(), seller_id: SELLER, kind: "part", category: "Brakes", title: "Corolla front brake pads", description: "Brand new, still boxed.", price: 25000, currency: "NGN", condition: "new", country: "NG", city: "Lagos", fits_make: "Toyota", fits_model: "Corolla", fits_year_from: 2014, fits_year_to: 2018, photos: [], status: "active", created_at: now(), seller: { id: SELLER, name: "Tunde", city: "Lagos", country: "NG" } }],
   };
   const calls = [];
@@ -164,6 +174,12 @@ async function fakes(p, db, calls) {
   await p.getByRole("button", { name: /Share car history/ }).click();
   const file = await dl;
   out.historyPdf = !!file && /history\.pdf$/.test(file.suggestedFilename());
+  // Selling: a car needs 30 days of Motiq history first.
+  await p.getByRole("button", { name: /Sell this car/ }).click(); await wait(300);
+  await dialog().getByRole("button", { name: "List it for sale" }).click(); await wait(400);
+  t = (await dialog().innerText()).toLowerCase();
+  out.sellWaits = t.includes("can be listed from") && t.includes("30 days of history") && await dialog().getByRole("button", { name: "Post listing" }).isDisabled();
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
 
   // 4) Scan: demo with problems, explained with a verdict.
   await p.getByRole("button", { name: "Scan", exact: true }).click(); await wait(600);
@@ -185,6 +201,8 @@ async function fakes(p, db, calls) {
   await p.getByRole("button", { name: "Send", exact: true }).click(); await wait(1200);
   t = await body();
   out.askReply = t.includes("brake wear indicator") && (t.match(/drive with caution/g) || []).length >= 2;
+  await p.getByRole("button", { name: "Car value" }).click(); await wait(1200);
+  out.carValue = (await body()).includes("private sale:") && db.ai_messages.some((m) => /worth today/.test(m.content || ""));
   await shot("ai");
 
   // 6) Nearby: real places around you, with directions.
@@ -236,7 +254,23 @@ async function fakes(p, db, calls) {
   await shot("quotes");
   await p.getByRole("button", { name: /Accept & message/ }).click(); await wait(1000);
   out.quoteAccepted = db.quote_offers[0].status === "accepted" && db.quote_requests[0].status === "accepted" && db.conversations.length === 2 && (await body()).includes("tunde");
-  await p.getByRole("button", { name: "Back" }).click(); await wait(500);
+  await p.getByRole("button", { name: "Back" }).click(); await wait(700);
+  out.rating = (await body()).includes("4.7 (3)");
+  await p.getByRole("button", { name: "Book a time" }).click(); await wait(300);
+  await dialog().getByRole("button", { name: "Request this time" }).click(); await wait(700);
+  out.booked = db.bookings.length === 1 && db.bookings[0].offer_id === db.quote_offers[0].id && new Date(db.bookings[0].starts_at) > new Date();
+  await p.getByRole("button", { name: /Pay ₦45,000 through Motiq/ }).click(); await wait(2500);
+  t = await body();
+  out.jobPaid = db.job_payments.length === 1 && t.includes("held safely") && !/job=paid/.test(p.url());
+  await p.getByRole("button", { name: "Job done", exact: true }).click(); await wait(300);
+  await dialog().getByRole("button", { name: "Job done" }).click(); await wait(800);
+  out.jobReleased = db.job_payments[0].status === "released";
+  await p.getByRole("button", { name: "Rate the mechanic" }).click(); await wait(300);
+  await dialog().getByRole("radio", { name: "5 stars" }).click();
+  await dialog().getByLabel("How did it go? (optional)").fill("Fair price and quick.");
+  await dialog().getByRole("button", { name: "Post review" }).click(); await wait(700);
+  out.reviewed = db.mechanic_reviews.length === 1 && db.mechanic_reviews[0].rating === 5;
+  await shot("quotes-done");
 
   // 8) Profile: real name and stats; save a document.
   await nav("Profile"); await wait(700);
@@ -262,6 +296,27 @@ async function fakes(p, db, calls) {
   await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
   out.proCard = (await body()).includes("active until");
 
+  // 8b2) Papers for Nigeria, Fleet, share cards, background trips.
+  await p.getByRole("button", { name: "Car papers for my country" }).click(); await wait(300);
+  await dialog().getByRole("button", { name: /Vehicle licence/ }).click(); await wait(200);
+  await dialog().getByLabel("Expires on (optional)").fill(new Date(Date.now() + 200 * 86400000).toISOString().slice(0, 10));
+  await dialog().getByRole("button", { name: "Save" }).click(); await wait(700);
+  out.papers = db.vehicle_documents.some((d) => d.title === "Vehicle licence" && d.kind === "registration") && (await dialog().innerText()).includes("Added");
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  await p.getByRole("button", { name: "Fleet dashboard" }).click(); await wait(500);
+  t = (await dialog().innerText()).toLowerCase();
+  out.fleetUpsell = t.includes("fleet plan shows every car") && t.includes("get motiq fleet") && t.includes("₦150,000");
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  await p.getByRole("button", { name: "Share a card" }).click(); await wait(500);
+  const card = p.waitForEvent("download", { timeout: 6000 }).catch(() => null);
+  await dialog().getByRole("button", { name: /Car health/ }).click();
+  const cardFile = await card;
+  out.shareCard = !!cardFile && /motiq-health\.png$/.test(cardFile.suggestedFilename());
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  await p.getByRole("button", { name: /Background trips/ }).click(); await wait(300);
+  out.bgTripsWeb = (await dialog().innerText()).includes("work in the Motiq Android app");
+  await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+
   // 8c) Language: French menus, saved to the profile; then back to English.
   await p.getByRole("button", { name: "Language" }).click(); await wait(300);
   await dialog().getByRole("button", { name: "Français" }).click(); await wait(700);
@@ -278,6 +333,7 @@ async function fakes(p, db, calls) {
   await p.getByRole("button", { name: "Admin" }).click(); await wait(900);
   t = await body();
   out.admin = t.includes("1,234") && t.includes("corolla front brake pads");
+  out.adminUsage = t.includes("42 active users") && t.includes("open home") && t.includes("mechanic payments");
   await p.getByRole("button", { name: "Back" }).click(); await wait(400);
 
   // 9) Home bell lists real alerts (codes, document expiring).
@@ -285,6 +341,7 @@ async function fakes(p, db, calls) {
   await p.getByRole("button", { name: /^Notifications/ }).click(); await wait();
   t = (await dialog().innerText()).toLowerCase();
   out.notifications = t.includes("2 fault codes") && t.includes("insurance expires soon");
+  out.inbox = t.includes("welcome to motiq 1.5") && t.includes("sent you a quote") === false && db.notifications[0].read_at != null;
   await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
 
   // 10) Car Mode Radio and the voice co-pilot.
@@ -379,9 +436,15 @@ async function fakes(p, db, calls) {
   await dialog().getByRole("button", { name: "Add a contact" }).click();
   await dialog().getByLabel("Name").fill("Mum"); await dialog().getByLabel("Phone").fill("+234 803 000 0000");
   await dialog().getByRole("button", { name: "Save contact" }).click(); await wait(700);
-  out.sosContact = Array.isArray(db.profiles[0].sos_contacts) && db.profiles[0].sos_contacts[0].name === "Mum" && (await dialog().innerText()).includes("Text my location to Mum");
+  out.sosContact = db.profile_private.length === 1 && db.profile_private[0].sos_contacts[0].name === "Mum" && !(db.profiles[0].sos_contacts || []).length && (await dialog().innerText()).includes("Text my location to Mum");
   await shot("sos");
   await dialog().getByRole("button", { name: "Close" }).click(); await wait(300);
+  // Regression: "Nearest mechanics and help" must open the Nearby screen (1.4 opened a blank one).
+  await p.getByRole("button", { name: "SOS emergency" }).first().click(); await wait(600);
+  await dialog().getByRole("button", { name: /Nearest mechanics and help/ }).click(); await wait(1200);
+  t = await body();
+  out.sosNearby = t.includes("nearby help") && t.includes("lagos auto repair");
+  await nav("Home"); await wait(500);
   // Driving score, work trips and the mileage log (a scored trip from earlier this week).
   db.trips.push({ id: "trip-1", owner_id: ME, vehicle_id: db.vehicles[0].id, origin: "Home", destination: "Office", distance_km: 18.2, duration_sec: 1900, alerts: 1, real_route: true, completed: true, score: 88, hard_brakes: 1, speeding_sec: 0, night: false, purpose: "personal", ended_at: new Date(Date.now() - 3600000).toISOString() });
   await nav("Profile"); await wait(300);

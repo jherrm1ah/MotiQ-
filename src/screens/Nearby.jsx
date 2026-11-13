@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, MapPin, Clock, Phone, Globe, ChevronRight, Navigation, LocateFixed, Loader2, Store, Plus, MessageCircle, Send, Package, Wrench, Car as CarIcon, Inbox, X, Camera, ArrowLeft, RefreshCw, Flag, Ban } from "lucide-react";
 import { t } from "../lib/i18n.js";
 import { supabase } from "../lib/supabase.js";
-import { useTheme, useUI, RED, AMBER, GREEN, GlowIcon, Pill, Field, PrimaryButton, SecondaryButton, Empty, Card, ScreenHeader, RoundButton, Skeleton, fmtDist } from "../design.jsx";
+import { useTheme, useUI, RED, AMBER, GREEN, GlowIcon, Pill, Field, PrimaryButton, SecondaryButton, Empty, Card, ScreenHeader, RoundButton, Skeleton, fmtDist, carLabel } from "../design.jsx";
 import { PLACE_CATEGORIES, findPlaces } from "../lib/places.js";
 import { currentPosition, directionsUrl } from "../lib/geo.js";
 import { loadListings, saveListing, setListingStatus, uploadPhoto, listingPhotoUrl, contactSeller, loadInbox, loadMessages, sendMessage, markRead, reportListing, blockUser } from "../lib/data.js";
@@ -16,9 +16,9 @@ import QuotesView from "./Quotes.jsx";
 const openExternal = (url) => { const w = window.open(url, "_blank", "noopener"); if (!w) window.location.href = url; };
 
 export default function Nearby() {
-  const { marketFilter } = useUI();
+  const { marketFilter, marketView } = useUI();
   const { TEXT, SUB, CARD, BORDER, FILL, FILL_TEXT } = useTheme();
-  const [tab, setTab] = useState("places");
+  const [tab, setTab] = useState(marketView ? "market" : "places");
   return (
     <div className="flex flex-col gap-5 px-5 pt-2" style={{ paddingBottom: 120 }}>
       <div className="flex items-end justify-between gap-3 pt-2">
@@ -32,7 +32,7 @@ export default function Nearby() {
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className="rounded-full px-4 py-1.5 text-xs font-semibold transition-all" style={{ backgroundColor: tab === k ? FILL : "transparent", color: tab === k ? FILL_TEXT : SUB }}>{l}</button>
         ))}
       </div>
-      {tab === "places" ? <Places initialFilter={marketFilter || "All"} /> : <Market />}
+      {tab === "places" ? <Places initialFilter={marketFilter || "All"} /> : <Market initialView={marketView} />}
     </div>
   );
 }
@@ -182,10 +182,10 @@ const CATEGORIES = {
   car: ["Sedan", "SUV", "Pickup", "Hatchback", "Van & bus", "Other"],
 };
 
-function Market() {
+function Market({ initialView }) {
   const { me, vehicle, openSheet, closeSheet, showToast, blocks } = useUI();
   const { CARD, TEXT, SUB, BORDER, FILL, FILL_TEXT } = useTheme();
-  const [view, setView] = useState("browse"); // browse | mine | inbox
+  const [view, setView] = useState(initialView || "browse"); // browse | quotes | mine | inbox
   const [kind, setKind] = useState("part");
   const [q, setQ] = useState("");
   const [fits, setFits] = useState(false);
@@ -303,7 +303,12 @@ function ListingSheet({ l, onContact, onEdit, onChanged }) {
         </div>
       )}
       <p className="text-2xl font-bold" style={{ color: TEXT }}>{l.price != null ? money(l.price, l.currency) : "Ask for price"}</p>
-      <div className="flex flex-wrap gap-1.5">{tag(l.category)}{l.condition !== "na" && tag(l.condition[0].toUpperCase() + l.condition.slice(1))}{fit && tag(`Fits ${fit}`, GREEN)}</div>
+      <div className="flex flex-wrap gap-1.5">{tag(l.category)}{l.condition !== "na" && tag(l.condition[0].toUpperCase() + l.condition.slice(1))}{fit && tag(`Fits ${fit}`, GREEN)}{l.verified && tag("✓ Verified by Motiq", GREEN)}</div>
+      {l.kind === "car" && l.car_since && (
+        <div className="rounded-xl p-3 text-xs leading-relaxed" style={{ backgroundColor: "rgba(61,220,132,0.1)", color: TEXT }}>
+          <b>Motiq history:</b> on Motiq since {new Date(l.car_since).toLocaleDateString(undefined, { month: "short", year: "numeric" })} ({Math.max(1, Math.round((Date.now() - new Date(l.car_since).getTime()) / (30 * 86400000)))} month{Math.round((Date.now() - new Date(l.car_since).getTime()) / (30 * 86400000)) === 1 ? "" : "s"}) · {l.car_services || 0} service{l.car_services === 1 ? "" : "s"} logged
+        </div>
+      )}
       {l.description && <p className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: TEXT }}>{l.description}</p>}
       <p className="text-xs" style={{ color: SUB }}>{mine ? "Your listing" : `Sold by ${(l.seller && l.seller.name) || "a Motiq user"}`} · {[l.city, countryName(l.country)].filter(Boolean).join(", ")} · listed {dateLabel(l.created_at)}</p>
       <p className="rounded-xl p-3 text-xs leading-relaxed" style={{ backgroundColor: "rgba(245,185,68,0.12)", color: AMBER }}>Meet in a public place, check the item before you pay, and never send money in advance to someone you don't know.</p>
@@ -353,8 +358,12 @@ function ReportForm({ listing }) {
   );
 }
 
-function ListingForm({ l, onSaved }) {
-  const { me, vehicle, showToast } = useUI();
+export function ListingForm({ l, onSaved }) {
+  const { me, uid, vehicle, vehicles, showToast } = useUI();
+  const ownCars = vehicles.filter((v) => v.owner_id === uid);
+  const readyOn = (v) => new Date(new Date(v.created_at).getTime() + 30 * 86400000);
+  const ready = (v) => v.created_at && readyOn(v) <= new Date();
+  const pickCar = (v) => setD((x) => ({ ...x, vehicle_id: v.id, title: x.title || [v.year, v.make, v.model, v.trim_level].filter(Boolean).join(" "), fits_make: v.make, fits_model: v.model, fits_year_from: v.year || "" }));
   const { SUB, CARD_ALT, BORDER } = useTheme();
   const [d, setD] = useState({ category: CATEGORIES[l.kind][0], fits_make: l.kind === "part" && vehicle ? vehicle.make : "", fits_model: l.kind === "part" && vehicle ? vehicle.model : "", ...l });
   const [busy, setBusy] = useState(false);
@@ -387,6 +396,22 @@ function ListingForm({ l, onSaved }) {
           <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files.length) addPhotos(e.target.files); e.target.value = ""; }} />
         </div>
       </div>
+      {d.kind === "car" && !l.id && (
+        <div>
+          {label("Which car? (from your garage)")}
+          {ownCars.length === 0 ? <p className="text-xs" style={{ color: SUB }}>Add the car to your garage first. Cars can be sold on Motiq after 30 days of history.</p> : (
+            <div className="flex flex-col gap-2">
+              {ownCars.map((v) => (
+                <button type="button" key={v.id} disabled={!ready(v)} onClick={() => pickCar(v)} aria-pressed={d.vehicle_id === v.id} className="flex items-center justify-between rounded-2xl px-3 py-2.5 text-left disabled:opacity-60" style={{ backgroundColor: CARD_ALT, border: `1px solid ${d.vehicle_id === v.id ? GREEN : BORDER}` }}>
+                  <span className="text-sm" style={{ color: "inherit" }}>{carLabel(v)}</span>
+                  <span className="text-[11px]" style={{ color: ready(v) ? GREEN : SUB }}>{ready(v) ? (d.vehicle_id === v.id ? "Selected" : "Ready to sell") : `Can be listed from ${readyOn(v).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`}</span>
+                </button>
+              ))}
+              <p className="text-[11px]" style={{ color: SUB }}>To protect buyers, a car needs at least 30 days of history in Motiq before it can be sold. Buyers see how long it's been on Motiq and how many services are logged.</p>
+            </div>
+          )}
+        </div>
+      )}
       <Field label="Title" value={d.title || ""} onChange={set("title")} maxLength={90} placeholder={d.kind === "service" ? "Engine diagnostics and repairs" : d.kind === "car" ? "2014 Toyota Corolla LE" : "Front brake pads, Corolla 2014–2018"} />
       <div>{label("Category")}<div className="flex flex-wrap gap-2">{CATEGORIES[d.kind].map((c) => <Pill key={c} small active={d.category === c} onClick={() => setD({ ...d, category: c })}>{c}</Pill>)}</div></div>
       <div className="grid grid-cols-[1fr_110px] gap-3">
@@ -404,7 +429,7 @@ function ListingForm({ l, onSaved }) {
       )}
       <Field label="City" value={d.city || ""} onChange={set("city")} />
       <Field label="Description" as="textarea" rows={4} value={d.description || ""} onChange={set("description")} maxLength={3000} placeholder="Condition, part number, what's included, opening hours…" />
-      <PrimaryButton type="submit" disabled={busy}>{busy && <Loader2 size={15} className="animate-spin" />}{l.id ? "Save" : "Post listing"}</PrimaryButton>
+      <PrimaryButton type="submit" disabled={busy || (d.kind === "car" && !l.id && !d.vehicle_id)}>{busy && <Loader2 size={15} className="animate-spin" />}{l.id ? "Save" : "Post listing"}</PrimaryButton>
     </form>
   );
 }

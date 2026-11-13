@@ -3,14 +3,14 @@
 import React, { useEffect, useMemo } from "react";
 import {
   Bell, ChevronRight, Search, SlidersHorizontal, Camera, Car, Bluetooth, BluetoothConnected, Navigation, Music2,
-  Timer, ShieldAlert, AlertTriangle, ScanLine, CircleDot, FileText, Wrench, Package, Droplets, BatteryCharging, Building2, Fuel, Zap, Plus,
+  Timer, ShieldAlert, AlertTriangle, MessageCircle, CalendarDays, Wallet, Star, ScanLine, CircleDot, FileText, Wrench, Package, Droplets, BatteryCharging, Building2, Fuel, Zap, Plus,
 } from "lucide-react";
 import { t } from "../lib/i18n.js";
 import {
   useTheme, useUI, ACCENT, RED, AMBER, GREEN, BLUE, PURPLE, CYAN, GlowIcon, Ring, NotifRow, Stat, LiveStat, RowButton, PrimaryButton, SecondaryButton, NeonButton,
   carLabel, carFull, healthColor, toneColor, timeAgo, fmtDist, fmtSpeed, fmtTemp, fmtDuration,
 } from "../design.jsx";
-import { reminderState } from "../lib/data.js";
+import { reminderState, markNotificationsRead } from "../lib/data.js";
 import { daysUntil, dateLabel } from "../lib/units.js";
 import { CarForm, ReminderForm, ServiceForm, OBDConnectSheet } from "./Garage.jsx";
 import { TodayCard, DailyTools, ScoreCard, WeeklyCard, SosButton, SosSheet } from "./Daily.jsx";
@@ -22,7 +22,8 @@ export const PLACE_ICONS = {
 
 export default function Home() {
   const ui = useUI();
-  const { me, unit, vehicles, vehicle, setCarId, garage, documents, trips, trip, obd, liveData, connectOBD, disconnectOBD, goTo, openSheet, closeSheet, prefs } = ui;
+  const { me, unit, vehicles, vehicle, setCarId, garage, documents, trips, trip, obd, liveData, connectOBD, disconnectOBD, goTo, openSheet, closeSheet, prefs, inbox } = ui;
+  const unreadInbox = inbox.filter((n) => !n.read_at).length;
   const { CARD, CARD_ALT, TEXT, SUB, BORDER, RING_TRACK, FILL, FILL_TEXT, mode } = useTheme();
   const firstName = (me.name || "").trim().split(/\s+/)[0];
 
@@ -115,9 +116,9 @@ export default function Home() {
           <p className="mt-0.5 text-sm" style={{ color: SUB }}>{t(codes.length ? "Your car needs a look." : vehicle.healthInfo.overdue.length ? "Something's overdue." : "Here's your car today.")}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2"><SosButton />
-        <button onClick={() => openSheet("Notifications", <Notifications items={notifications} />)} className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full active:scale-95 transition-transform" style={{ backgroundColor: CARD }} aria-label={`Notifications${notifications.length ? ` (${notifications.length})` : ""}`}>
+        <button onClick={() => openSheet("Notifications", <Notifications items={notifications} />)} className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full active:scale-95 transition-transform" style={{ backgroundColor: CARD }} aria-label={`Notifications${notifications.length + unreadInbox ? ` (${notifications.length + unreadInbox})` : ""}`}>
           <Bell size={16} style={{ color: TEXT }} />
-          {notifications.length > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full" style={{ backgroundColor: notifications.some((n) => n.color === RED) ? RED : ACCENT }} />}
+          {(notifications.length > 0 || unreadInbox > 0) && <span className="absolute right-2 top-2 h-2 w-2 rounded-full" style={{ backgroundColor: unreadInbox || notifications.some((n) => n.color === RED) ? RED : ACCENT }} />}
         </button></div>
       </div>
 
@@ -258,10 +259,22 @@ function QuickTile({ icon: Icon, label, status, color, onClick, aria, disabled }
 
 function Notifications({ items }) {
   const { SUB } = useTheme();
-  const { goTo, setCarId } = useUI();
+  const { goTo, setCarId, inbox, setInbox, uid, linkTo, closeSheet } = useUI();
+  useEffect(() => {
+    if (inbox.some((n) => !n.read_at)) { markNotificationsRead(uid).catch(() => {}); setInbox((x) => x.map((n) => ({ ...n, read_at: n.read_at || new Date().toISOString() }))); }
+  }, []);
+  const updates = inbox.slice(0, 20);
+  if (updates.length) return (
+    <div className="flex flex-col gap-4">
+      {updates.map((n) => <NotifRow key={n.id} icon={NOTIF_ICONS[n.kind] || Bell} color={n.read_at ? SUB : ACCENT} title={n.title} time={timeAgo(n.created_at)} text={n.body} onClick={() => { closeSheet(); linkTo(n.link); }} />)}
+      {items.map((n) => <NotifRow key={n.key} icon={n.icon} color={n.color} title={n.title} time={n.time} text={n.text} onClick={() => { if (n.car) setCarId(n.car); goTo(n.go); }} />)}
+    </div>
+  );
   if (!items.length) return <p className="py-6 text-center text-sm" style={{ color: SUB }}>You're all caught up. Motiq will tell you here when something's due, a scan finds a problem or a document is about to expire.</p>;
   return <div className="flex flex-col gap-4">{items.map((n) => <NotifRow key={n.key} icon={n.icon} color={n.color} title={n.title} time={n.time} text={n.text} onClick={() => { if (n.car) setCarId(n.car); goTo(n.go); }} />)}</div>;
 }
+
+const NOTIF_ICONS = { quote_offer: Wrench, quote_accepted: Wrench, message: MessageCircle, booking: CalendarDays, payment: Wallet, review: Star, road: AlertTriangle, system: Bell };
 
 function CategoryList() {
   const { CARD_ALT, TEXT } = useTheme();

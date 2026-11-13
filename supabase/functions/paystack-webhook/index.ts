@@ -22,6 +22,23 @@ Deno.serve(async (req) => {
   const event = JSON.parse(raw);
   if (event.event !== "charge.success") return new Response("ignored");
   const ref = event.data && event.data.reference;
+
+  // Paying a mechanic: hold the money until the driver marks the job done.
+  if (typeof ref === "string" && ref.startsWith("job_")) {
+    const { data: job } = await admin.from("job_payments").select("*").eq("reference", ref).maybeSingle();
+    if (!job) return new Response("unknown reference");
+    if (event.data.currency !== job.currency || Number(event.data.amount) !== Math.round(Number(job.amount) * 100)) {
+      await admin.from("job_payments").update({ status: "failed" }).eq("id", job.id).eq("status", "pending");
+      return new Response("amount mismatch");
+    }
+    const { data: claimed } = await admin.from("job_payments").update({ status: "held", paid_at: new Date().toISOString() }).eq("id", job.id).eq("status", "pending").select("id");
+    if (!claimed || claimed.length === 0) return new Response("already done");
+    const money = `${job.currency} ${Number(job.amount).toLocaleString("en-US")}`;
+    await admin.rpc("notify", { p_user: job.provider_id, p_kind: "payment", p_title: "The driver paid for the job", p_body: `${money} is held safely by Motiq. You'll get it (minus the Motiq fee) when the driver marks the job done.`, p_link: "quotes" });
+    await admin.rpc("notify", { p_user: job.driver_id, p_kind: "payment", p_title: "Payment received", p_body: `${money} is held safely. Tap "Job done" when the work is finished and the mechanic gets paid.`, p_link: "quotes" });
+    return new Response("ok");
+  }
+
   const { data: pay } = await admin.from("payments").select("*").eq("reference", ref).maybeSingle();
   if (!pay) return new Response("unknown reference");
   if (pay.status === "paid") return new Response("already done");
@@ -34,8 +51,8 @@ Deno.serve(async (req) => {
   const { data: claimed } = await admin.from("payments").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", pay.id).neq("status", "paid").select("id");
   if (!claimed || claimed.length === 0) return new Response("already done");
   const { data: me } = await admin.from("profiles").select("plan, pro_until").eq("id", pay.owner_id).maybeSingle();
-  const start = me && me.plan === "pro" && me.pro_until && new Date(me.pro_until) > new Date() ? new Date(me.pro_until) : new Date();
+  const start = me && (me.plan === "pro" || me.plan === "fleet") && me.pro_until && new Date(me.pro_until) > new Date() ? new Date(me.pro_until) : new Date();
   start.setMonth(start.getMonth() + pay.months);
-  await admin.from("profiles").update({ plan: "pro", pro_until: start.toISOString() }).eq("id", pay.owner_id);
+  await admin.from("profiles").update({ plan: pay.plan === "fleet" ? "fleet" : (me && me.plan === "fleet" ? "fleet" : "pro"), pro_until: start.toISOString() }).eq("id", pay.owner_id);
   return new Response("ok");
 });

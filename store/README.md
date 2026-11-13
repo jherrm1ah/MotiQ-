@@ -6,7 +6,7 @@ Everything here is ready except three things only you can do: a Google Play deve
 
 - **Google Play Console account** ($25 one-time): <https://play.google.com/console>
 - **Support email:** put it in `public/privacy.html` (search for `[support email]`) and in the Play listing.
-- **Privacy policy URL:** `https://<your Motiq site>/privacy.html` (for example `https://motiq.vercel.app/privacy.html` once merged).
+- **Privacy policy URL:** `https://<your Motiq site>/privacy.html` (for example `https://<your-motiq-address>/privacy.html` once merged).
 
 ## 2. Make your upload key (once, on your own computer)
 

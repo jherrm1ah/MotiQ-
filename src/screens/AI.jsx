@@ -2,10 +2,10 @@
 // "safe / caution / stop" verdict first, then the reasoning — from Motiq's AI mechanic, which knows
 // this car's details, service history and last scan.
 import React, { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ScanLine, Gauge, ShieldAlert, Timer, Droplets, Sparkles, Camera, Plus, Send, Mic, Loader2, Clock, Wrench, AudioLines, Bot, Trash2, ImagePlus } from "lucide-react";
+import { AlertTriangle, ScanLine, Gauge, ShieldAlert, Timer, Droplets, Sparkles, Camera, Plus, Send, Mic, Loader2, Clock, Wrench, AudioLines, Bot, Trash2, ImagePlus, BadgeDollarSign } from "lucide-react";
 import { t } from "../lib/i18n.js";
-import { useTheme, useUI, RED, VERDICT_STYLE, VerdictBadge, parseVerdict, ScreenHeader, RoundButton, carLabel, timeAgo, SecondaryButton, Skeleton } from "../design.jsx";
-import { askMotiq, loadAiHistory, clearAiHistory, uploadPhoto } from "../lib/data.js";
+import { useTheme, useUI, RED, VERDICT_STYLE, VerdictBadge, parseVerdict, ScreenHeader, RoundButton, carLabel, timeAgo, SecondaryButton, Skeleton, carFull } from "../design.jsx";
+import { askMotiq, loadAiHistory, clearAiHistory, uploadPhoto, track } from "../lib/data.js";
 import { canListen, listen, stopListening } from "../lib/voice.js";
 import { describeCode } from "../lib/dtc.js";
 import Markdown from "./Markdown.jsx";
@@ -27,7 +27,7 @@ const SYMPTOMS = [
 ];
 
 export default function AIScreen() {
-  const { uid, me, vehicles, vehicle, setCarId, goTo, openSheet, closeSheet, confirm, showToast, aiPrompt, clearAiPrompt } = useUI();
+  const { uid, me, vehicles, vehicle, setCarId, goTo, openSheet, closeSheet, confirm, showToast, aiPrompt, clearAiPrompt, unit } = useUI();
   const { BG, CARD, CARD_ALT, TEXT, SUB, BORDER, FILL, FILL_TEXT } = useTheme();
   const [messages, setMessages] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -35,6 +35,7 @@ export default function AIScreen() {
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
   const fileRef = useRef(null);
+  const photoMode = useRef("chat"); // which photo tool picked the file: chat | light | damage
   const endRef = useRef(null);
   const firstName = (me.name || "").trim().split(/\s+/)[0];
 
@@ -47,19 +48,23 @@ export default function AIScreen() {
   useEffect(() => { endRef.current && endRef.current.scrollIntoView({ block: "end" }); }, [messages.length, loading]);
   useEffect(() => {
     if (!aiPrompt) return;
-    if (aiPrompt === "__photo__") openAttach(); else send(aiPrompt);
+    if (aiPrompt === "__photo__") openAttach();
+    else if (aiPrompt === "__light__" || aiPrompt === "__damage__") pickPhoto(aiPrompt.slice(2, -2));
+    else if (aiPrompt === "__value__") carValue();
+    else send(aiPrompt);
     clearAiPrompt();
   }, [aiPrompt]);
 
-  async function send(text, imagePath = null, previewUrl = null) {
+  async function send(text, imagePath = null, previewUrl = null, mode = "chat") {
     const msg = (text || "").trim();
     if ((!msg && !imagePath) || loading) return;
-    const question = msg || "Here's a photo of my car — a warning light, damage or something I'm worried about. What do you see, and what should I do?";
+    track(`ai_${mode}`);
+    const question = msg || (mode === "light" ? "Which warning lights are on in this photo of my dashboard, and what should I do?" : mode === "damage" ? "What is this damage, is it safe to drive, and what will it cost to fix?" : "Here's a photo of my car — a warning light, damage or something I'm worried about. What do you see, and what should I do?");
     setMessages((m) => [...m, { id: `u${Date.now()}`, role: "user", content: question, clean: question, preview: previewUrl, image_path: imagePath }]);
     setInput("");
     setLoading(true);
     try {
-      const reply = await askMotiq({ message: question, vehicleId: vehicle ? vehicle.id : null, mode: "chat", imagePath });
+      const reply = await askMotiq({ message: question, vehicleId: vehicle ? vehicle.id : null, mode, imagePath });
       setMessages((m) => [...m, { id: `a${Date.now()}`, role: "assistant", content: reply, ...parseVerdict(reply), created_at: new Date().toISOString() }]);
     } catch (e) {
       setMessages((m) => [...m, { id: `e${Date.now()}`, role: "assistant", error: true, clean: e.message || "Couldn't reach the AI mechanic. Check your connection and try again." }]);
@@ -72,15 +77,23 @@ export default function AIScreen() {
     let path = null;
     try { path = await uploadPhoto("ai-photos", uid, file); } catch (e) { setLoading(false); showToast(e.message || "Couldn't upload the photo"); return; }
     setLoading(false);
-    send(input, path, URL.createObjectURL(file));
+    const mode = photoMode.current; photoMode.current = "chat";
+    send(input, path, URL.createObjectURL(file), mode);
+  }
+  function pickPhoto(mode) { photoMode.current = mode; fileRef.current && fileRef.current.click(); }
+  function carValue() {
+    if (!vehicle) return showToast("Add your car first.");
+    send(`What is my ${carFull(vehicle)} with ${(vehicle.odometer || 0).toLocaleString()} ${unit} worth today?`, null, null, "value");
   }
   function openAttach() {
     openSheet("Add a photo", (
       <div className="flex flex-col gap-2">
-        <button type="button" onClick={() => { closeSheet(); fileRef.current && fileRef.current.click(); }} className="flex items-center gap-3 rounded-2xl p-3.5 text-left active:scale-[0.98] transition-transform" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
-          <Camera size={17} style={{ color: TEXT }} />
-          <div><p className="text-sm font-medium" style={{ color: TEXT }}>Take or choose a photo</p><p className="text-xs" style={{ color: SUB }}>A warning light, damage, a leak — anything you're unsure about</p></div>
-        </button>
+        {[["light", Gauge, "Warning light on the dashboard", "Point at the dashboard with the engine running"], ["damage", Wrench, "Damage, a tyre or a leak", "Get the likely cause and what it costs to fix"], ["chat", Camera, "Something else", "Anything you're unsure about"]].map(([mode, Icon, title, sub]) => (
+          <button key={mode} type="button" onClick={() => { closeSheet(); pickPhoto(mode); }} className="flex items-center gap-3 rounded-2xl p-3.5 text-left active:scale-[0.98] transition-transform" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
+            <Icon size={17} style={{ color: TEXT }} />
+            <div><p className="text-sm font-medium" style={{ color: TEXT }}>{title}</p><p className="text-xs" style={{ color: SUB }}>{sub}</p></div>
+          </button>
+        ))}
       </div>
     ));
   }
@@ -117,6 +130,14 @@ export default function AIScreen() {
           <div className="min-w-0"><p className="text-xs font-semibold" style={{ color: RED }}>Heads up</p><p className="mt-0.5 text-xs leading-relaxed" style={{ color: SUB }}>{carLabel(vehicle)} — {flag.text}</p></div>
         </button>
       )}
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {[["Warning light", Gauge, () => pickPhoto("light")], ["Damage check", Wrench, () => pickPhoto("damage")], ["Car value", BadgeDollarSign, carValue]].map(([label, Icon, go]) => (
+          <button key={label} onClick={go} disabled={loading} className="flex flex-col items-center gap-1.5 rounded-2xl py-3 active:scale-95 transition-transform" style={{ backgroundColor: CARD, border: `1px solid ${BORDER}` }}>
+            <Icon size={17} style={{ color: TEXT }} /><span className="text-[11px] font-medium" style={{ color: TEXT }}>{label}</span>
+          </button>
+        ))}
+      </div>
 
       {loaded && messages.length === 0 && (
         <div className="mt-3 grid grid-cols-2 gap-2.5">
